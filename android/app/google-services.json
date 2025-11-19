@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "76527337706",
+    "project_id": "kfestival-dev-team",
+    "storage_bucket": "kfestival-dev-team.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:76527337706:android:a1d4f337de1f2210379793",
+        "android_client_info": {
+          "package_name": "com.example.kfestival"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCB1WF5pd4yGCMx85zN2i1FU_r0KikYET0"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
