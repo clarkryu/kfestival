@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:kfestival/main.dart';
+import 'package:kfestival/festival_detail.dart'; // 🔥 [추가] 상세 페이지 연결
 
 class GuestHomePage extends StatefulWidget {
   const GuestHomePage({super.key});
@@ -10,10 +13,9 @@ class GuestHomePage extends StatefulWidget {
 }
 
 class _GuestHomePageState extends State<GuestHomePage> {
-  Position? _currentPosition;
-  // 🔥 현재 선택된 장르 (기본값: 전체)
-  String _selectedFilter = '전체';
-  final List<String> _filters = ['전체', '락/밴드', '재즈/클래식', '힙합/EDM', '발라드/R&B'];
+  Position? _myPosition;
+  String _selectedGenre = '전체';
+  final List<String> _genres = ['전체', '락/밴드', '재즈/클래식', '힙합/EDM', '발라드/R&B', '기타'];
 
   @override
   void initState() {
@@ -21,107 +23,126 @@ class _GuestHomePageState extends State<GuestHomePage> {
     _getCurrentLocation();
   }
 
-  Future<void> _getCurrentLocation() async {
-    bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
-    if (!serviceEnabled) return;
-
-    LocationPermission permission = await Geolocator.checkPermission();
-    if (permission == LocationPermission.denied) {
-      permission = await Geolocator.requestPermission();
-      if (permission == LocationPermission.denied) return;
+  void _logout() async {
+    await FirebaseAuth.instance.signOut();
+    if (mounted) {
+      Navigator.pushAndRemoveUntil(
+        context,
+        MaterialPageRoute(builder: (context) => const LoginPage()),
+        (route) => false,
+      );
     }
-    if (permission == LocationPermission.deniedForever) return;
-
-    final position = await Geolocator.getCurrentPosition();
-    setState(() {
-      _currentPosition = position;
-    });
   }
 
-  String _calculateDistance(double lat, double lng) {
-    if (_currentPosition == null) return '계산중...';
+  Future<void> _getCurrentLocation() async {
+    try {
+      LocationPermission permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+      }
+
+      if (permission == LocationPermission.whileInUse || permission == LocationPermission.always) {
+        Position position = await Geolocator.getCurrentPosition(
+          desiredAccuracy: LocationAccuracy.high,
+          timeLimit: const Duration(seconds: 5),
+        );
+        
+        if (mounted) {
+          setState(() {
+            _myPosition = position;
+          });
+        }
+      }
+    } catch (e) {
+      print("위치 확인 실패: $e");
+    }
+  }
+
+  String _getDistance(Map<String, dynamic> data) {
+    if (_myPosition == null || data['latitude'] == null || data['longitude'] == null) {
+      return '- km';
+    }
+
+    double lat = (data['latitude'] as num).toDouble();
+    double lng = (data['longitude'] as num).toDouble();
+
+    if (lat == 0.0 && lng == 0.0) return '위치 미상';
+
     double distanceInMeters = Geolocator.distanceBetween(
-      _currentPosition!.latitude,
-      _currentPosition!.longitude,
+      _myPosition!.latitude,
+      _myPosition!.longitude,
       lat,
       lng,
     );
+
     return '${(distanceInMeters / 1000).toStringAsFixed(1)}km';
   }
 
   @override
   Widget build(BuildContext context) {
-    // 🔥 DB 쿼리 만들기 (필터링 로직)
-    Query query = FirebaseFirestore.instance
-        .collection('festivals')
-        .orderBy('createdAt', descending: true);
-
-    // '전체'가 아닐 때만 where 조건 추가
-    if (_selectedFilter != '전체') {
-      query = query.where('genre', isEqualTo: _selectedFilter);
+    Query query = FirebaseFirestore.instance.collection('festivals').orderBy('createdAt', descending: true);
+    if (_selectedGenre != '전체') {
+      query = query.where('genre', isEqualTo: _selectedGenre);
     }
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('내 주변 페스티벌'),
+        title: const Text('축제 둘러보기'),
         backgroundColor: Colors.white,
         foregroundColor: Colors.black,
         elevation: 0,
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.search),
+            onPressed: () {
+              showSearch(
+                context: context,
+                delegate: FestivalSearchDelegate(myPosition: _myPosition),
+              );
+            },
+          ),
+          IconButton(
+            icon: const Icon(Icons.logout),
+            onPressed: _logout,
+          ),
+        ],
       ),
       body: Column(
         children: [
-          // 🔥 상단 장르 필터 버튼들
           SingleChildScrollView(
             scrollDirection: Axis.horizontal,
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
             child: Row(
-              children: _filters.map((filter) {
-                final isSelected = _selectedFilter == filter;
+              children: _genres.map((genre) {
+                final isSelected = _selectedGenre == genre;
                 return Padding(
                   padding: const EdgeInsets.only(right: 8),
                   child: ChoiceChip(
-                    label: Text(filter),
+                    label: Text(genre),
                     selected: isSelected,
-                    onSelected: (selected) {
-                      setState(() {
-                        _selectedFilter = filter;
-                      });
-                    },
-                    selectedColor: Colors.deepPurple,
+                    selectedColor: Colors.deepPurple.withOpacity(0.2),
                     labelStyle: TextStyle(
-                      color: isSelected ? Colors.white : Colors.black,
+                      color: isSelected ? Colors.deepPurple : Colors.black,
                       fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
                     ),
-                    backgroundColor: Colors.grey[100],
+                    onSelected: (selected) {
+                      setState(() => _selectedGenre = genre);
+                    },
                   ),
                 );
               }).toList(),
             ),
           ),
 
-          // 리스트 뷰 영역
           Expanded(
             child: StreamBuilder<QuerySnapshot>(
-              stream: query.snapshots(), // 위에서 만든 query 사용
+              stream: query.snapshots(),
               builder: (context, snapshot) {
                 if (snapshot.connectionState == ConnectionState.waiting) {
                   return const Center(child: CircularProgressIndicator());
                 }
-
                 if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
-                  return Center(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(Icons.filter_list_off, size: 48, color: Colors.grey[300]),
-                        const SizedBox(height: 16),
-                        Text(
-                          '$_selectedFilter 장르의 축제가 없어요.',
-                          style: const TextStyle(color: Colors.grey),
-                        ),
-                      ],
-                    ),
-                  );
+                  return const Center(child: Text('현재 진행 중인 축제가 없습니다.'));
                 }
 
                 final docs = snapshot.data!.docs;
@@ -131,10 +152,7 @@ class _GuestHomePageState extends State<GuestHomePage> {
                   itemCount: docs.length,
                   itemBuilder: (context, index) {
                     final data = docs[index].data() as Map<String, dynamic>;
-                    double tempLat = 37.5665 + (index * 0.01);
-                    double tempLng = 126.9780 + (index * 0.01);
-
-                    return _buildFestivalCard(data, tempLat, tempLng);
+                    return _buildFestivalCard(context, data);
                   },
                 );
               },
@@ -145,84 +163,181 @@ class _GuestHomePageState extends State<GuestHomePage> {
     );
   }
 
-  Widget _buildFestivalCard(Map<String, dynamic> data, double lat, double lng) {
+  Widget _buildFestivalCard(BuildContext context, Map<String, dynamic> data) {
     return Card(
-      margin: const EdgeInsets.only(bottom: 20),
-      elevation: 4,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // 상단 이미지에 장르 뱃지 추가
-          Stack(
-            children: [
-              ClipRRect(
-                borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
-                child: Image.network(
-                  data['image'] ?? '',
-                  height: 180,
-                  width: double.infinity,
-                  fit: BoxFit.cover,
-                  errorBuilder: (context, error, stackTrace) => Container(
-                    height: 180,
-                    color: Colors.grey[300],
-                    child: const Center(child: Icon(Icons.broken_image)),
-                  ),
+      margin: const EdgeInsets.only(bottom: 16),
+      elevation: 3,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      child: InkWell( // 🔥 클릭 효과 추가
+        onTap: () {
+          // 상세 페이지로 이동
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (context) => FestivalDetailPage(data: data),
+            ),
+          );
+        },
+        borderRadius: BorderRadius.circular(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            ClipRRect(
+              borderRadius: const BorderRadius.vertical(top: Radius.circular(12)),
+              child: Image.network(
+                data['image'] ?? '',
+                height: 180,
+                width: double.infinity,
+                fit: BoxFit.cover,
+                errorBuilder: (c, e, s) => Container(
+                  height: 180, color: Colors.grey[300],
+                  child: const Icon(Icons.broken_image, color: Colors.grey),
                 ),
               ),
-              Positioned(
-                top: 12,
-                right: 12,
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: Colors.black.withValues(alpha: 0.6),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Text(
-                    data['genre'] ?? '장르 미정', // 장르 표시
-                    style: const TextStyle(color: Colors.white, fontSize: 12),
-                  ),
-                ),
-              ),
-            ],
-          ),
-          Padding(
-            padding: const EdgeInsets.all(16.0),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Text(
-                      data['title'] ?? '제목 없음',
-                      style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-                    ),
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                      decoration: BoxDecoration(
-                        color: Colors.deepPurple[50],
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: Text(
-                        _calculateDistance(lat, lng),
-                        style: const TextStyle(
-                          color: Colors.deepPurple,
-                          fontWeight: FontWeight.bold,
-                          fontSize: 12,
+            ),
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: Colors.grey[100],
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: Text(
+                          data['genre'] ?? '기타',
+                          style: const TextStyle(fontSize: 12, color: Colors.grey),
                         ),
                       ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 8),
-                Text(data['location'] ?? '장소 미정', style: TextStyle(color: Colors.grey[600])),
-              ],
+                      Row(
+                        children: [
+                          const Icon(Icons.location_on, size: 14, color: Colors.deepPurple),
+                          const SizedBox(width: 4),
+                          Text(
+                            _getDistance(data),
+                            style: const TextStyle(
+                              fontSize: 12, 
+                              fontWeight: FontWeight.bold, 
+                              color: Colors.deepPurple
+                            ),
+                          ),
+                        ],
+                      )
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    data['title'] ?? '제목 없음',
+                    style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    data['location'] ?? '',
+                    style: TextStyle(color: Colors.grey[600]),
+                    maxLines: 1, overflow: TextOverflow.ellipsis,
+                  ),
+                ],
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
+    );
+  }
+}
+
+class FestivalSearchDelegate extends SearchDelegate {
+  final Position? myPosition;
+
+  FestivalSearchDelegate({this.myPosition});
+
+  @override
+  String get searchFieldLabel => '축제 이름 검색';
+
+  @override
+  List<Widget>? buildActions(BuildContext context) {
+    return [
+      IconButton(
+        icon: const Icon(Icons.clear),
+        onPressed: () => query = '',
+      ),
+    ];
+  }
+
+  @override
+  Widget? buildLeading(BuildContext context) {
+    return IconButton(
+      icon: const Icon(Icons.arrow_back),
+      onPressed: () => close(context, null),
+    );
+  }
+
+  @override
+  Widget buildResults(BuildContext context) => _buildSearchList(context);
+
+  @override
+  Widget buildSuggestions(BuildContext context) => _buildSearchList(context);
+
+  Widget _buildSearchList(BuildContext context) {
+    if (query.isEmpty) {
+      return const Center(child: Text("찾고 싶은 축제 이름을 입력하세요."));
+    }
+
+    return StreamBuilder<QuerySnapshot>(
+      stream: FirebaseFirestore.instance
+          .collection('festivals')
+          .orderBy('title')
+          .startAt([query])
+          .endAt(['$query\uf8ff'])
+          .snapshots(),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Center(child: CircularProgressIndicator());
+        }
+        if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+          return const Center(child: Text("검색 결과가 없습니다."));
+        }
+
+        final docs = snapshot.data!.docs;
+
+        return ListView.builder(
+          padding: const EdgeInsets.all(16),
+          itemCount: docs.length,
+          itemBuilder: (context, index) {
+            final data = docs[index].data() as Map<String, dynamic>;
+            return Card(
+              margin: const EdgeInsets.only(bottom: 10),
+              child: ListTile(
+                leading: ClipRRect(
+                  borderRadius: BorderRadius.circular(4),
+                  child: Image.network(
+                    data['image'] ?? '',
+                    width: 50, height: 50, fit: BoxFit.cover,
+                    errorBuilder: (c, e, s) => const Icon(Icons.image_not_supported),
+                  ),
+                ),
+                title: Text(data['title'] ?? '제목 없음', style: const TextStyle(fontWeight: FontWeight.bold)),
+                subtitle: Text(data['location'] ?? ''),
+                trailing: const Icon(Icons.arrow_forward_ios, size: 14),
+                // 🔥 검색 결과 클릭 시에도 상세 페이지 이동
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => FestivalDetailPage(data: data),
+                    ),
+                  );
+                },
+              ),
+            );
+          },
+        );
+      },
     );
   }
 }
