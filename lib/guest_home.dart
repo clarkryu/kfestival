@@ -3,7 +3,8 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:kfestival/main.dart';
-import 'package:kfestival/festival_detail.dart'; // 🔥 [추가] 상세 페이지 연결
+import 'package:kfestival/festival_detail.dart';
+import 'package:kfestival/guest_map.dart'; // 🔥 [추가] 지도 페이지 연결
 
 class GuestHomePage extends StatefulWidget {
   const GuestHomePage({super.key});
@@ -160,6 +161,21 @@ class _GuestHomePageState extends State<GuestHomePage> {
           ),
         ],
       ),
+      // 🔥 [추가] 지도 보기 버튼 (FloatingActionButton)
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: () {
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (context) => GuestMapPage(initialPosition: _myPosition),
+            ),
+          );
+        },
+        label: const Text('지도 보기'),
+        icon: const Icon(Icons.map),
+        backgroundColor: Colors.black87,
+        foregroundColor: Colors.white,
+      ),
     );
   }
 
@@ -168,9 +184,8 @@ class _GuestHomePageState extends State<GuestHomePage> {
       margin: const EdgeInsets.only(bottom: 16),
       elevation: 3,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      child: InkWell( // 🔥 클릭 효과 추가
+      child: InkWell(
         onTap: () {
-          // 상세 페이지로 이동
           Navigator.push(
             context,
             MaterialPageRoute(
@@ -324,7 +339,6 @@ class FestivalSearchDelegate extends SearchDelegate {
                 title: Text(data['title'] ?? '제목 없음', style: const TextStyle(fontWeight: FontWeight.bold)),
                 subtitle: Text(data['location'] ?? ''),
                 trailing: const Icon(Icons.arrow_forward_ios, size: 14),
-                // 🔥 검색 결과 클릭 시에도 상세 페이지 이동
                 onTap: () {
                   Navigator.push(
                     context,

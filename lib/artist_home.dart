@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:kfestival/main.dart'; // LoginPage 이동용
+import 'package:kfestival/main.dart';
+import 'package:kfestival/festival_detail.dart';
 
 class ArtistHomePage extends StatefulWidget {
   const ArtistHomePage({super.key});
@@ -41,7 +42,6 @@ class _ArtistHomePageState extends State<ArtistHomePage> {
         });
   }
 
-  // 🔥 [추가] 로그아웃 함수
   void _logout() async {
     await FirebaseAuth.instance.signOut();
     if (mounted) {
@@ -194,7 +194,6 @@ class _ArtistHomePageState extends State<ArtistHomePage> {
             tooltip: "프로필 수정",
             onPressed: _showProfileEditor,
           ),
-          // 🔥 [추가] 로그아웃 버튼
           IconButton(
             icon: const Icon(Icons.logout),
             tooltip: "로그아웃",
@@ -264,6 +263,7 @@ class _ArtistHomePageState extends State<ArtistHomePage> {
                       data['genre'] ?? '장르 미정',
                       data['location'] ?? '장소 미정',
                       data['hostId'] ?? '',
+                      data, // 🔥 전체 데이터를 넘김 (상세페이지 이동용)
                     );
                   },
                 );
@@ -346,6 +346,7 @@ class _ArtistHomePageState extends State<ArtistHomePage> {
     String genre, 
     String location,
     String hostId,
+    Map<String, dynamic> data, // 🔥 상세 페이지로 넘길 전체 데이터
   ) {
     bool isApplied = _appliedFestivalIds.contains(festivalId);
 
@@ -353,39 +354,53 @@ class _ArtistHomePageState extends State<ArtistHomePage> {
       margin: const EdgeInsets.only(bottom: 12),
       elevation: 2,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      child: ListTile(
-        contentPadding: const EdgeInsets.all(12),
-        leading: Container(
-          width: 50, height: 50,
-          decoration: BoxDecoration(
-            color: Colors.orange[50],
-            borderRadius: BorderRadius.circular(8),
+      child: InkWell( // 🔥 클릭하면 상세 페이지로 이동
+        onTap: () {
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (context) => FestivalDetailPage(
+                data: data,
+                isArtistMode: true, // 🔥 [핵심] "나 아티스트야!" 라고 알려줌
+              ),
+            ),
+          );
+        },
+        borderRadius: BorderRadius.circular(12),
+        child: ListTile(
+          contentPadding: const EdgeInsets.all(12),
+          leading: Container(
+            width: 50, height: 50,
+            decoration: BoxDecoration(
+              color: Colors.orange[50],
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: const Icon(Icons.campaign, color: Colors.orange),
           ),
-          child: const Icon(Icons.campaign, color: Colors.orange),
-        ),
-        title: Text(title, style: const TextStyle(fontWeight: FontWeight.bold)),
-        subtitle: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const SizedBox(height: 4),
-            Text('$date  |  $genre'),
-            Text(location, style: TextStyle(color: Colors.grey[600], fontSize: 12)),
-          ],
-        ),
-        trailing: ElevatedButton(
-          onPressed: () => _handleApplication(context, festivalId, title, hostId),
-          style: ElevatedButton.styleFrom(
-            backgroundColor: isApplied ? Colors.green : Colors.black,
-            foregroundColor: Colors.white,
-            minimumSize: const Size(80, 36),
-            padding: const EdgeInsets.symmetric(horizontal: 12),
+          title: Text(title, style: const TextStyle(fontWeight: FontWeight.bold)),
+          subtitle: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const SizedBox(height: 4),
+              Text('$date  |  $genre'),
+              Text(location, style: TextStyle(color: Colors.grey[600], fontSize: 12)),
+            ],
           ),
-          child: isApplied 
-            ? const Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [Icon(Icons.check, size: 16), SizedBox(width: 4), Text('완료')],
-              )
-            : const Text('지원'),
+          trailing: ElevatedButton(
+            onPressed: () => _handleApplication(context, festivalId, title, hostId),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: isApplied ? Colors.green : Colors.black,
+              foregroundColor: Colors.white,
+              minimumSize: const Size(80, 36),
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+            ),
+            child: isApplied 
+              ? const Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [Icon(Icons.check, size: 16), SizedBox(width: 4), Text('완료')],
+                )
+              : const Text('지원'),
+          ),
         ),
       ),
     );

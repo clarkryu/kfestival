@@ -5,22 +5,27 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:geocoding/geocoding.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:firebase_storage/firebase_storage.dart';
-import 'package:kfestival/main.dart'; // LoginPage로 이동하기 위해 필요
+import 'package:kfestival/main.dart';
+import 'package:intl/intl.dart'; // 🔥 날짜 포맷용 패키지
 
 class HostHomePage extends StatelessWidget {
   const HostHomePage({super.key});
 
-  // 🔥 [추가] 로그아웃 함수
   void _logout(BuildContext context) async {
     await FirebaseAuth.instance.signOut();
     if (context.mounted) {
-      // 로그인 페이지로 이동 (뒤로 가기 없애기)
       Navigator.pushAndRemoveUntil(
         context,
         MaterialPageRoute(builder: (context) => const LoginPage()),
         (route) => false,
       );
     }
+  }
+
+  Future<void> _updateAppStatus(String appId, String newStatus) async {
+    await FirebaseFirestore.instance.collection('applications').doc(appId).update({
+      'status': newStatus,
+    });
   }
 
   void _showApplicants(BuildContext context, String festivalId, String title) {
@@ -54,34 +59,23 @@ class HostHomePage extends StatelessWidget {
                       return const Center(child: CircularProgressIndicator());
                     }
                     if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
-                      return const Center(
-                        child: Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Icon(Icons.people_outline, size: 48, color: Colors.grey),
-                            SizedBox(height: 10),
-                            Text("아직 지원자가 없습니다."),
-                          ],
-                        ),
-                      );
+                      return const Center(child: Text("아직 지원자가 없습니다."));
                     }
                     final apps = snapshot.data!.docs;
                     return ListView.builder(
                       itemCount: apps.length,
                       itemBuilder: (context, index) {
                         final app = apps[index].data() as Map<String, dynamic>;
+                        final String status = app['status'] ?? 'pending';
+
                         return Card(
-                          margin: const EdgeInsets.only(bottom: 10),
                           color: Colors.grey[50],
                           child: ListTile(
                             leading: CircleAvatar(
                               backgroundColor: Colors.deepPurple[100],
                               child: const Icon(Icons.person, color: Colors.deepPurple),
                             ),
-                            title: Text(
-                              app['artistName'] ?? '이름 없음',
-                              style: const TextStyle(fontWeight: FontWeight.bold),
-                            ),
+                            title: Text(app['artistName'] ?? '이름 없음', style: const TextStyle(fontWeight: FontWeight.bold)),
                             subtitle: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
@@ -89,11 +83,22 @@ class HostHomePage extends StatelessWidget {
                                 Text("이메일: ${app['artistEmail']}", style: const TextStyle(fontSize: 12)),
                               ],
                             ),
-                            trailing: const Chip(
-                              label: Text('대기중', style: TextStyle(fontSize: 10, color: Colors.white)),
-                              backgroundColor: Colors.orange,
-                              padding: EdgeInsets.zero,
-                            ),
+                            trailing: status == 'pending'
+                                ? Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      IconButton(
+                                        icon: const Icon(Icons.check_circle, color: Colors.green),
+                                        onPressed: () => _updateAppStatus(apps[index].id, 'accepted'),
+                                      ),
+                                      IconButton(
+                                        icon: const Icon(Icons.cancel, color: Colors.red),
+                                        onPressed: () => _updateAppStatus(apps[index].id, 'rejected'),
+                                      ),
+                                    ],
+                                  )
+                                : Text(status == 'accepted' ? "수락됨" : "거절됨",
+                                    style: TextStyle(color: status == 'accepted' ? Colors.green : Colors.red, fontWeight: FontWeight.bold)),
                           ),
                         );
                       },
@@ -114,13 +119,29 @@ class HostHomePage extends StatelessWidget {
 
     final titleController = TextEditingController(text: isEditing ? (data?['title'] ?? '') : '');
     final locationController = TextEditingController(text: isEditing ? (data?['location'] ?? '') : '');
-    String selectedGenre = isEditing ? (data?['genre'] ?? '락/밴드') : '락/밴드';
+    final descriptionController = TextEditingController(text: isEditing ? (data?['description'] ?? '') : '');
+    
+    String selectedMainGenre = isEditing ? (data?['genre'] ?? '락/밴드') : '락/밴드';
     String? currentImageUrl = data?['image'] as String?;
+    
+    // 🔥 [수정] 날짜 처리 로직 (Timestamp -> DateTime)
+    DateTimeRange? selectedDateRange;
+    if (isEditing && data?['startDate'] != null && data?['endDate'] != null) {
+      selectedDateRange = DateTimeRange(
+        start: (data!['startDate'] as Timestamp).toDate(),
+        end: (data['endDate'] as Timestamp).toDate(),
+      );
+    }
+
     bool isRecruiting = isEditing ? (data?['isRecruiting'] ?? true) : true;
+    final recruitDetailController = TextEditingController(text: isEditing ? (data?['recruitDetail'] ?? '') : '');
+    
+    List<dynamic> loadedTargets = isEditing ? (data?['targetGenres'] ?? []) : [];
+    List<String> targetGenres = loadedTargets.map((e) => e.toString()).toList();
 
     File? newImageFile;
     final ImagePicker picker = ImagePicker();
-    final List<String> genres = ['락/밴드', '재즈/클래식', '힙합/EDM', '발라드/R&B', '기타'];
+    final List<String> allGenres = ['락/밴드', '재즈/클래식', '힙합/EDM', '발라드/R&B', '기타'];
     bool isProcessing = false;
 
     await showDialog(
@@ -128,160 +149,251 @@ class HostHomePage extends StatelessWidget {
       barrierDismissible: false,
       builder: (context) => StatefulBuilder(
         builder: (context, setState) {
+          
           Future<void> pickImage() async {
             final XFile? image = await picker.pickImage(source: ImageSource.gallery);
             if (image != null) {
-              setState(() {
-                newImageFile = File(image.path);
-              });
+              setState(() => newImageFile = File(image.path));
             }
           }
 
+          // 🔥 [추가] 날짜 선택 함수 (DateRangePicker)
+          Future<void> pickDateRange() async {
+            final DateTimeRange? picked = await showDateRangePicker(
+              context: context,
+              firstDate: DateTime.now(), // 오늘 이전은 선택 불가
+              lastDate: DateTime(2030),
+              initialDateRange: selectedDateRange,
+              builder: (context, child) {
+                return Theme(
+                  data: ThemeData.light().copyWith(
+                    colorScheme: const ColorScheme.light(primary: Colors.deepPurple),
+                  ),
+                  child: child!,
+                );
+              }
+            );
+            if (picked != null) {
+              setState(() => selectedDateRange = picked);
+            }
+          }
+
+          // 날짜 텍스트 포맷팅 (예: 2025.05.23 ~ 05.25)
+          String dateText = "날짜를 선택해주세요";
+          if (selectedDateRange != null) {
+            String start = DateFormat('yyyy.MM.dd').format(selectedDateRange!.start);
+            String end = DateFormat('MM.dd').format(selectedDateRange!.end);
+            dateText = "$start ~ $end";
+          }
+
           return AlertDialog(
-            title: Text(isEditing ? '축제 정보 수정' : '새 축제 등록'),
-            content: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  GestureDetector(
-                    onTap: pickImage,
-                    child: Container(
-                      width: double.infinity,
-                      height: 150,
-                      decoration: BoxDecoration(
-                        color: Colors.grey[200],
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: Colors.grey[400]!),
+            title: Text(isEditing ? '축제 수정' : '새 축제 등록'),
+            content: SizedBox(
+              width: double.maxFinite,
+              child: SingleChildScrollView(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text("🎪 축제 기본 정보 (관객용)", style: TextStyle(fontWeight: FontWeight.bold, color: Colors.deepPurple)),
+                    const SizedBox(height: 10),
+                    GestureDetector(
+                      onTap: pickImage,
+                      child: Container(
+                        width: double.infinity,
+                        height: 180,
+                        decoration: BoxDecoration(
+                          color: Colors.grey[200],
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: Colors.grey[400]!),
+                        ),
+                        child: _buildImagePreview(newImageFile, currentImageUrl),
                       ),
-                      child: _buildImagePreview(newImageFile, currentImageUrl),
                     ),
-                  ),
-                  const SizedBox(height: 16),
-                  TextField(
-                    controller: titleController,
-                    decoration: const InputDecoration(labelText: '축제 이름'),
-                  ),
-                  TextField(
-                    controller: locationController,
-                    decoration: const InputDecoration(
-                      labelText: '주소 (예: 서울시 강남구)',
-                      helperText: '주소를 수정하면 좌표도 다시 계산됩니다.',
+                    const SizedBox(height: 10),
+                    TextField(
+                      controller: titleController,
+                      decoration: const InputDecoration(labelText: '축제 제목', border: OutlineInputBorder()),
                     ),
-                  ),
-                  const SizedBox(height: 16),
-                  const Text('장르 선택', style: TextStyle(fontSize: 12, color: Colors.grey)),
-                  DropdownButton<String>(
-                    value: genres.contains(selectedGenre) ? selectedGenre : '락/밴드',
-                    isExpanded: true,
-                    items: genres.map((String genre) {
-                      return DropdownMenuItem<String>(
-                        value: genre,
-                        child: Text(genre),
-                      );
-                    }).toList(),
-                    onChanged: (String? newValue) {
-                      setState(() => selectedGenre = newValue!);
-                    },
-                  ),
-                  const SizedBox(height: 16),
-                  Container(
-                    decoration: BoxDecoration(
-                      color: isRecruiting ? Colors.green[50] : Colors.grey[100],
-                      borderRadius: BorderRadius.circular(8),
-                      border: Border.all(color: isRecruiting ? Colors.green : Colors.grey),
+                    const SizedBox(height: 10),
+                    TextField(
+                      controller: locationController,
+                      decoration: const InputDecoration(labelText: '장소 (주소)', border: OutlineInputBorder()),
                     ),
-                    child: SwitchListTile(
-                      title: Text(
-                        isRecruiting ? "아티스트 모집 중" : "모집 마감",
-                        style: TextStyle(
-                          fontWeight: FontWeight.bold,
-                          color: isRecruiting ? Colors.green[700] : Colors.grey,
+                    const SizedBox(height: 10),
+                    
+                    // 🔥 [변경] 날짜 선택 UI
+                    GestureDetector(
+                      onTap: pickDateRange,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 16),
+                        decoration: BoxDecoration(
+                          border: Border.all(color: Colors.grey),
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: Row(
+                          children: [
+                            const Icon(Icons.calendar_today, color: Colors.grey),
+                            const SizedBox(width: 10),
+                            Text(
+                              dateText,
+                              style: TextStyle(
+                                color: selectedDateRange == null ? Colors.grey[600] : Colors.black,
+                                fontSize: 16,
+                              ),
+                            ),
+                          ],
                         ),
                       ),
-                      subtitle: const Text("Artist 앱에 노출하려면 켜주세요"),
+                    ),
+
+                    const SizedBox(height: 10),
+                    TextField(
+                      controller: descriptionController,
+                      maxLines: 5,
+                      decoration: const InputDecoration(
+                        labelText: '축제 상세 소개',
+                        hintText: '관객들에게 축제를 자세히 소개해 주세요.',
+                        border: OutlineInputBorder(),
+                        alignLabelWithHint: true,
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    const Text('대표 장르 (카테고리)', style: TextStyle(fontSize: 12, color: Colors.grey)),
+                    DropdownButton<String>(
+                      value: allGenres.contains(selectedMainGenre) ? selectedMainGenre : '락/밴드',
+                      isExpanded: true,
+                      items: allGenres.map((String genre) {
+                        return DropdownMenuItem<String>(value: genre, child: Text(genre));
+                      }).toList(),
+                      onChanged: (val) => setState(() => selectedMainGenre = val!),
+                    ),
+
+                    const Divider(height: 40, thickness: 2),
+
+                    const Text("🎸 아티스트 모집 설정", style: TextStyle(fontWeight: FontWeight.bold, color: Colors.deepPurple)),
+                    SwitchListTile(
+                      title: const Text("공연팀 모집하기"),
                       value: isRecruiting,
                       activeColor: Colors.green,
-                      onChanged: (bool value) {
-                        setState(() => isRecruiting = value);
-                      },
+                      contentPadding: EdgeInsets.zero,
+                      onChanged: (val) => setState(() => isRecruiting = val),
                     ),
-                  ),
-                  if (isProcessing)
-                    const Padding(
-                      padding: EdgeInsets.only(top: 20),
-                      child: Center(child: CircularProgressIndicator()),
-                    ),
-                ],
+
+                    if (isRecruiting) ...[
+                      const Text('모집 장르 (다중 선택 가능)', style: TextStyle(fontSize: 12, color: Colors.grey)),
+                      Wrap(
+                        spacing: 8.0,
+                        children: allGenres.map((genre) {
+                          final isSelected = targetGenres.contains(genre);
+                          return FilterChip(
+                            label: Text(genre),
+                            selected: isSelected,
+                            onSelected: (bool selected) {
+                              setState(() {
+                                if (selected) {
+                                  targetGenres.add(genre);
+                                } else {
+                                  targetGenres.remove(genre);
+                                }
+                              });
+                            },
+                          );
+                        }).toList(),
+                      ),
+                      const SizedBox(height: 10),
+                      TextField(
+                        controller: recruitDetailController,
+                        maxLines: 3,
+                        decoration: const InputDecoration(
+                          labelText: '모집 요강 / 우대 사항',
+                          hintText: '예: 30분 공연 가능 팀, 자작곡 보유 우대 등',
+                          border: OutlineInputBorder(),
+                          alignLabelWithHint: true,
+                        ),
+                      ),
+                    ],
+
+                    if (isProcessing)
+                      const Padding(
+                        padding: EdgeInsets.only(top: 20),
+                        child: Center(child: CircularProgressIndicator()),
+                      ),
+                  ],
+                ),
               ),
             ),
             actions: [
-              if (!isProcessing)
-                TextButton(
-                  onPressed: () => Navigator.pop(context),
-                  child: const Text('취소'),
-                ),
-              if (!isProcessing)
-                ElevatedButton(
-                  onPressed: () async {
-                    if (titleController.text.isEmpty || locationController.text.isEmpty) return;
-                    setState(() => isProcessing = true);
+              TextButton(onPressed: () => Navigator.pop(context), child: const Text('취소')),
+              ElevatedButton(
+                onPressed: () async {
+                  // 🔥 유효성 검사 (제목, 장소, 날짜 필수)
+                  if (titleController.text.isEmpty || locationController.text.isEmpty || selectedDateRange == null) {
+                     ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('제목, 장소, 날짜는 필수입니다.')));
+                     return;
+                  }
+                  setState(() => isProcessing = true);
 
-                    try {
-                      final user = FirebaseAuth.instance.currentUser;
-                      if (user != null) {
-                        String finalImageUrl = currentImageUrl ?? 'https://picsum.photos/400/200';
-                        if (newImageFile != null) {
-                          final String fileName = '${DateTime.now().millisecondsSinceEpoch}.jpg';
-                          final Reference ref = FirebaseStorage.instance.ref().child('festivals/$fileName');
-                          await ref.putFile(newImageFile!);
-                          finalImageUrl = await ref.getDownloadURL();
-                        }
-
-                        double lat = 0.0;
-                        double lng = 0.0;
-                        if (isEditing) {
-                          lat = (data?['latitude'] ?? 0.0).toDouble();
-                          lng = (data?['longitude'] ?? 0.0).toDouble();
-                        }
-                        try {
-                          List<Location> locations = await locationFromAddress(locationController.text);
-                          if (locations.isNotEmpty) {
-                            lat = locations.first.latitude;
-                            lng = locations.first.longitude;
-                          }
-                        } catch (e) { print(e); }
-
-                        final Map<String, dynamic> festivalData = {
-                          'hostId': user.uid,
-                          'title': titleController.text,
-                          'location': locationController.text,
-                          'genre': selectedGenre,
-                          'date': '2025.05.23 ~ 05.25',
-                          'image': finalImageUrl,
-                          'latitude': lat,
-                          'longitude': lng,
-                          'isRecruiting': isRecruiting,
-                        };
-
-                        if (isEditing) {
-                          await FirebaseFirestore.instance.collection('festivals').doc(doc.id).update(festivalData);
-                        } else {
-                          festivalData['createdAt'] = FieldValue.serverTimestamp();
-                          await FirebaseFirestore.instance.collection('festivals').add(festivalData);
-                        }
-
-                        if (context.mounted) {
-                          Navigator.pop(context);
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(content: Text(isEditing ? '수정되었습니다! ✨' : '등록되었습니다! 🎉')),
-                          );
-                        }
+                  try {
+                    final user = FirebaseAuth.instance.currentUser;
+                    if (user != null) {
+                      String finalImageUrl = currentImageUrl ?? 'https://picsum.photos/400/200';
+                      if (newImageFile != null) {
+                        final String fileName = '${DateTime.now().millisecondsSinceEpoch}.jpg';
+                        final Reference ref = FirebaseStorage.instance.ref().child('festivals/$fileName');
+                        await ref.putFile(newImageFile!);
+                        finalImageUrl = await ref.getDownloadURL();
                       }
-                    } catch (e) { setState(() => isProcessing = false); }
-                  },
-                  child: Text(isEditing ? '수정 완료' : '등록'),
-                ),
+
+                      double lat = 0.0;
+                      double lng = 0.0;
+                      if (isEditing) {
+                        lat = (data?['latitude'] ?? 0.0).toDouble();
+                        lng = (data?['longitude'] ?? 0.0).toDouble();
+                      }
+                      try {
+                        List<Location> locations = await locationFromAddress(locationController.text);
+                        if (locations.isNotEmpty) {
+                          lat = locations.first.latitude;
+                          lng = locations.first.longitude;
+                        }
+                      } catch (e) { print(e); }
+
+                      // 🔥 날짜 문자열 생성 (표시용)
+                      String dateString = "${DateFormat('yyyy.MM.dd').format(selectedDateRange!.start)} ~ ${DateFormat('MM.dd').format(selectedDateRange!.end)}";
+
+                      final Map<String, dynamic> festivalData = {
+                        'hostId': user.uid,
+                        'title': titleController.text,
+                        'location': locationController.text,
+                        'description': descriptionController.text,
+                        'genre': selectedMainGenre,
+                        'date': dateString, // 표시용 문자열
+                        'startDate': Timestamp.fromDate(selectedDateRange!.start), // 🔥 정렬/필터용 진짜 날짜
+                        'endDate': Timestamp.fromDate(selectedDateRange!.end),     // 🔥 정렬/필터용 진짜 날짜
+                        'image': finalImageUrl,
+                        'latitude': lat,
+                        'longitude': lng,
+                        'isRecruiting': isRecruiting,
+                        'recruitDetail': recruitDetailController.text,
+                        'targetGenres': targetGenres,
+                      };
+
+                      if (isEditing) {
+                        await FirebaseFirestore.instance.collection('festivals').doc(doc.id).update(festivalData);
+                      } else {
+                        festivalData['createdAt'] = FieldValue.serverTimestamp();
+                        await FirebaseFirestore.instance.collection('festivals').add(festivalData);
+                      }
+
+                      if (context.mounted) {
+                        Navigator.pop(context);
+                        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('저장되었습니다! ✨')));
+                      }
+                    }
+                  } catch (e) { setState(() => isProcessing = false); }
+                },
+                child: const Text('저장'),
+              ),
             ],
           );
         },
@@ -335,10 +447,8 @@ class HostHomePage extends StatelessWidget {
         foregroundColor: Colors.black,
         elevation: 0,
         actions: [
-          // 🔥 [추가] 로그아웃 버튼
           IconButton(
             icon: const Icon(Icons.logout),
-            tooltip: '로그아웃',
             onPressed: () => _logout(context),
           ),
         ],
@@ -391,7 +501,6 @@ class HostHomePage extends StatelessWidget {
                                   children: [
                                     IconButton(
                                       icon: const Icon(Icons.people, color: Colors.deepPurple),
-                                      tooltip: "지원자 확인",
                                       onPressed: () => _showApplicants(context, doc.id, data['title'] ?? '축제'),
                                     ),
                                     PopupMenuButton<String>(
