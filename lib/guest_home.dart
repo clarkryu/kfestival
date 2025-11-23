@@ -4,7 +4,8 @@ import 'package:geolocator/geolocator.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:kfestival/main.dart';
 import 'package:kfestival/festival_detail.dart';
-import 'package:kfestival/guest_map.dart'; // 🔥 [추가] 지도 페이지 연결
+import 'package:kfestival/guest_map.dart';
+import 'package:kfestival/guest_saved.dart'; // 🔥 [추가] 찜 목록 페이지 연결
 
 class GuestHomePage extends StatefulWidget {
   const GuestHomePage({super.key});
@@ -93,8 +94,10 @@ class _GuestHomePageState extends State<GuestHomePage> {
         foregroundColor: Colors.black,
         elevation: 0,
         actions: [
+          // 검색 버튼
           IconButton(
             icon: const Icon(Icons.search),
+            tooltip: "축제 검색",
             onPressed: () {
               showSearch(
                 context: context,
@@ -102,8 +105,23 @@ class _GuestHomePageState extends State<GuestHomePage> {
               );
             },
           ),
+          // 🔥 [추가] 찜 목록(하트) 버튼
+          IconButton(
+            icon: const Icon(Icons.favorite, color: Colors.redAccent),
+            tooltip: "찜한 축제",
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => GuestSavedPage(myPosition: _myPosition),
+                ),
+              );
+            },
+          ),
+          // 로그아웃 버튼
           IconButton(
             icon: const Icon(Icons.logout),
+            tooltip: "로그아웃",
             onPressed: _logout,
           ),
         ],
@@ -152,8 +170,9 @@ class _GuestHomePageState extends State<GuestHomePage> {
                   padding: const EdgeInsets.all(16),
                   itemCount: docs.length,
                   itemBuilder: (context, index) {
-                    final data = docs[index].data() as Map<String, dynamic>;
-                    return _buildFestivalCard(context, data);
+                    final doc = docs[index];
+                    final data = doc.data() as Map<String, dynamic>;
+                    return _buildFestivalCard(context, data, doc.id);
                   },
                 );
               },
@@ -161,7 +180,6 @@ class _GuestHomePageState extends State<GuestHomePage> {
           ),
         ],
       ),
-      // 🔥 [추가] 지도 보기 버튼 (FloatingActionButton)
       floatingActionButton: FloatingActionButton.extended(
         onPressed: () {
           Navigator.push(
@@ -179,7 +197,7 @@ class _GuestHomePageState extends State<GuestHomePage> {
     );
   }
 
-  Widget _buildFestivalCard(BuildContext context, Map<String, dynamic> data) {
+  Widget _buildFestivalCard(BuildContext context, Map<String, dynamic> data, String docId) {
     return Card(
       margin: const EdgeInsets.only(bottom: 16),
       elevation: 3,
@@ -189,7 +207,7 @@ class _GuestHomePageState extends State<GuestHomePage> {
           Navigator.push(
             context,
             MaterialPageRoute(
-              builder: (context) => FestivalDetailPage(data: data),
+              builder: (context) => FestivalDetailPage(data: data, festivalId: docId),
             ),
           );
         },
@@ -266,6 +284,7 @@ class _GuestHomePageState extends State<GuestHomePage> {
   }
 }
 
+// 검색 기능 (기존 유지)
 class FestivalSearchDelegate extends SearchDelegate {
   final Position? myPosition;
 
@@ -324,7 +343,8 @@ class FestivalSearchDelegate extends SearchDelegate {
           padding: const EdgeInsets.all(16),
           itemCount: docs.length,
           itemBuilder: (context, index) {
-            final data = docs[index].data() as Map<String, dynamic>;
+            final doc = docs[index];
+            final data = doc.data() as Map<String, dynamic>;
             return Card(
               margin: const EdgeInsets.only(bottom: 10),
               child: ListTile(
@@ -343,7 +363,7 @@ class FestivalSearchDelegate extends SearchDelegate {
                   Navigator.push(
                     context,
                     MaterialPageRoute(
-                      builder: (context) => FestivalDetailPage(data: data),
+                      builder: (context) => FestivalDetailPage(data: data, festivalId: doc.id),
                     ),
                   );
                 },

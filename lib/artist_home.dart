@@ -263,7 +263,7 @@ class _ArtistHomePageState extends State<ArtistHomePage> {
                       data['genre'] ?? '장르 미정',
                       data['location'] ?? '장소 미정',
                       data['hostId'] ?? '',
-                      data, // 🔥 전체 데이터를 넘김 (상세페이지 이동용)
+                      data, 
                     );
                   },
                 );
@@ -346,7 +346,7 @@ class _ArtistHomePageState extends State<ArtistHomePage> {
     String genre, 
     String location,
     String hostId,
-    Map<String, dynamic> data, // 🔥 상세 페이지로 넘길 전체 데이터
+    Map<String, dynamic> data,
   ) {
     bool isApplied = _appliedFestivalIds.contains(festivalId);
 
@@ -354,14 +354,16 @@ class _ArtistHomePageState extends State<ArtistHomePage> {
       margin: const EdgeInsets.only(bottom: 12),
       elevation: 2,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      child: InkWell( // 🔥 클릭하면 상세 페이지로 이동
+      child: InkWell(
         onTap: () {
           Navigator.push(
             context,
             MaterialPageRoute(
+              // 🔥 [수정] festivalId 전달 (상세페이지에서 찜하기용)
               builder: (context) => FestivalDetailPage(
-                data: data,
-                isArtistMode: true, // 🔥 [핵심] "나 아티스트야!" 라고 알려줌
+                data: data, 
+                festivalId: festivalId,
+                isArtistMode: true,
               ),
             ),
           );
