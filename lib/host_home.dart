@@ -5,7 +5,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:geocoding/geocoding.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:firebase_storage/firebase_storage.dart';
-import 'package:kfestival/main.dart';
+import 'package:kfestival/login.dart';
 import 'package:intl/intl.dart'; // 🔥 날짜 포맷용 패키지
 
 class HostHomePage extends StatelessWidget {

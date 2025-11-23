@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:geocoding/geocoding.dart'; // 거리 계산용 (선택)
 import 'package:geolocator/geolocator.dart';
 import 'package:kfestival/festival_detail.dart';
 

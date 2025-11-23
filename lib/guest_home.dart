@@ -2,10 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:kfestival/main.dart';
+import 'package:kfestival/login.dart';
 import 'package:kfestival/festival_detail.dart';
 import 'package:kfestival/guest_map.dart';
-import 'package:kfestival/guest_saved.dart'; // 🔥 [추가] 찜 목록 페이지 연결
+import 'package:kfestival/guest_saved.dart';
+import 'package:kfestival/ui/liquid_theme.dart'; // 🔥 테마 임포트
 
 class GuestHomePage extends StatefulWidget {
   const GuestHomePage({super.key});
@@ -39,194 +40,119 @@ class _GuestHomePageState extends State<GuestHomePage> {
   Future<void> _getCurrentLocation() async {
     try {
       LocationPermission permission = await Geolocator.checkPermission();
-      if (permission == LocationPermission.denied) {
-        permission = await Geolocator.requestPermission();
-      }
-
+      if (permission == LocationPermission.denied) permission = await Geolocator.requestPermission();
       if (permission == LocationPermission.whileInUse || permission == LocationPermission.always) {
-        Position position = await Geolocator.getCurrentPosition(
-          desiredAccuracy: LocationAccuracy.high,
-          timeLimit: const Duration(seconds: 5),
-        );
-        
-        if (mounted) {
-          setState(() {
-            _myPosition = position;
-          });
-        }
+        Position position = await Geolocator.getCurrentPosition(desiredAccuracy: LocationAccuracy.high, timeLimit: const Duration(seconds: 5));
+        if (mounted) setState(() => _myPosition = position);
       }
-    } catch (e) {
-      print("위치 확인 실패: $e");
-    }
+    } catch (e) { print(e); }
   }
 
   String _getDistance(Map<String, dynamic> data) {
-    if (_myPosition == null || data['latitude'] == null || data['longitude'] == null) {
-      return '- km';
-    }
-
+    if (_myPosition == null || data['latitude'] == null || data['longitude'] == null) return '- km';
     double lat = (data['latitude'] as num).toDouble();
     double lng = (data['longitude'] as num).toDouble();
-
-    if (lat == 0.0 && lng == 0.0) return '위치 미상';
-
-    double distanceInMeters = Geolocator.distanceBetween(
-      _myPosition!.latitude,
-      _myPosition!.longitude,
-      lat,
-      lng,
-    );
-
-    return '${(distanceInMeters / 1000).toStringAsFixed(1)}km';
+    if (lat == 0.0 && lng == 0.0) return '';
+    double dist = Geolocator.distanceBetween(_myPosition!.latitude, _myPosition!.longitude, lat, lng);
+    return '${(dist / 1000).toStringAsFixed(1)}km';
   }
 
   @override
   Widget build(BuildContext context) {
     Query query = FirebaseFirestore.instance.collection('festivals').orderBy('createdAt', descending: true);
-    if (_selectedGenre != '전체') {
-      query = query.where('genre', isEqualTo: _selectedGenre);
-    }
+    if (_selectedGenre != '전체') query = query.where('genre', isEqualTo: _selectedGenre);
 
     return Scaffold(
+      extendBodyBehindAppBar: true, // 🔥 앱바 뒤까지 배경 확장
       appBar: AppBar(
-        title: const Text('축제 둘러보기'),
-        backgroundColor: Colors.white,
-        foregroundColor: Colors.black,
+        title: const Text('K-Festival', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+        backgroundColor: Colors.transparent,
         elevation: 0,
         actions: [
-          // 검색 버튼
-          IconButton(
-            icon: const Icon(Icons.search),
-            tooltip: "축제 검색",
-            onPressed: () {
-              showSearch(
-                context: context,
-                delegate: FestivalSearchDelegate(myPosition: _myPosition),
-              );
-            },
-          ),
-          // 🔥 [추가] 찜 목록(하트) 버튼
-          IconButton(
-            icon: const Icon(Icons.favorite, color: Colors.redAccent),
-            tooltip: "찜한 축제",
-            onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (context) => GuestSavedPage(myPosition: _myPosition),
-                ),
-              );
-            },
-          ),
-          // 로그아웃 버튼
-          IconButton(
-            icon: const Icon(Icons.logout),
-            tooltip: "로그아웃",
-            onPressed: _logout,
-          ),
+          IconButton(icon: const Icon(Icons.search, color: Colors.white), onPressed: () => showSearch(context: context, delegate: FestivalSearchDelegate(myPosition: _myPosition))),
+          IconButton(icon: const Icon(Icons.favorite, color: Colors.white), onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (context) => GuestSavedPage(myPosition: _myPosition)))),
+          IconButton(icon: const Icon(Icons.logout, color: Colors.white), onPressed: _logout),
         ],
       ),
-      body: Column(
-        children: [
-          SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-            child: Row(
-              children: _genres.map((genre) {
-                final isSelected = _selectedGenre == genre;
-                return Padding(
-                  padding: const EdgeInsets.only(right: 8),
-                  child: ChoiceChip(
-                    label: Text(genre),
-                    selected: isSelected,
-                    selectedColor: Colors.deepPurple.withOpacity(0.2),
-                    labelStyle: TextStyle(
-                      color: isSelected ? Colors.deepPurple : Colors.black,
-                      fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-                    ),
-                    onSelected: (selected) {
-                      setState(() => _selectedGenre = genre);
-                    },
-                  ),
-                );
-              }).toList(),
-            ),
-          ),
+      body: LiquidBackground( // 🔥 전체 파란 배경
+        child: SafeArea(
+          child: Column(
+            children: [
+              SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                child: Row(
+                  children: _genres.map((genre) {
+                    final isSelected = _selectedGenre == genre;
+                    return Padding(
+                      padding: const EdgeInsets.only(right: 8),
+                      child: ChoiceChip(
+                        label: Text(genre),
+                        selected: isSelected,
+                        selectedColor: Colors.white,
+                        backgroundColor: Colors.white.withOpacity(0.2),
+                        labelStyle: TextStyle(
+                          color: isSelected ? LiquidColors.deepBlue : Colors.white,
+                          fontWeight: FontWeight.bold,
+                        ),
+                        onSelected: (selected) => setState(() => _selectedGenre = genre),
+                      ),
+                    );
+                  }).toList(),
+                ),
+              ),
 
-          Expanded(
-            child: StreamBuilder<QuerySnapshot>(
-              stream: query.snapshots(),
-              builder: (context, snapshot) {
-                if (snapshot.connectionState == ConnectionState.waiting) {
-                  return const Center(child: CircularProgressIndicator());
-                }
-                if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
-                  return const Center(child: Text('현재 진행 중인 축제가 없습니다.'));
-                }
+              Expanded(
+                child: StreamBuilder<QuerySnapshot>(
+                  stream: query.snapshots(),
+                  builder: (context, snapshot) {
+                    if (snapshot.connectionState == ConnectionState.waiting) return const Center(child: CircularProgressIndicator(color: Colors.white));
+                    if (!snapshot.hasData || snapshot.data!.docs.isEmpty) return const Center(child: Text('축제가 없습니다.', style: TextStyle(color: Colors.white)));
 
-                final docs = snapshot.data!.docs;
+                    final docs = snapshot.data!.docs;
 
-                return ListView.builder(
-                  padding: const EdgeInsets.all(16),
-                  itemCount: docs.length,
-                  itemBuilder: (context, index) {
-                    final doc = docs[index];
-                    final data = doc.data() as Map<String, dynamic>;
-                    return _buildFestivalCard(context, data, doc.id);
+                    return ListView.builder(
+                      padding: const EdgeInsets.all(16),
+                      itemCount: docs.length,
+                      itemBuilder: (context, index) {
+                        final data = docs[index].data() as Map<String, dynamic>;
+                        // 🔥 [수정] Card 대신 LiquidGlassCard 사용
+                        return _buildGlassCard(context, data, docs[index].id);
+                      },
+                    );
                   },
-                );
-              },
-            ),
+                ),
+              ),
+            ],
           ),
-        ],
+        ),
       ),
       floatingActionButton: FloatingActionButton.extended(
-        onPressed: () {
-          Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (context) => GuestMapPage(initialPosition: _myPosition),
-            ),
-          );
-        },
-        label: const Text('지도 보기'),
-        icon: const Icon(Icons.map),
-        backgroundColor: Colors.black87,
-        foregroundColor: Colors.white,
+        onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (context) => GuestMapPage(initialPosition: _myPosition))),
+        label: const Text("지도 보기", style: TextStyle(color: LiquidColors.deepBlue, fontWeight: FontWeight.bold)),
+        icon: const Icon(Icons.map, color: LiquidColors.deepBlue),
+        backgroundColor: Colors.white,
       ),
     );
   }
 
-  Widget _buildFestivalCard(BuildContext context, Map<String, dynamic> data, String docId) {
-    return Card(
-      margin: const EdgeInsets.only(bottom: 16),
-      elevation: 3,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      child: InkWell(
+  // 🔥 [새로 만든 위젯] 유리 카드 디자인
+  Widget _buildGlassCard(BuildContext context, Map<String, dynamic> data, String docId) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 16),
+      child: LiquidGlassCard( // Card 대신 커스텀 유리 카드 사용
         onTap: () {
-          Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (context) => FestivalDetailPage(data: data, festivalId: docId),
-            ),
-          );
+          Navigator.push(context, MaterialPageRoute(builder: (context) => FestivalDetailPage(data: data, festivalId: docId)));
         },
-        borderRadius: BorderRadius.circular(12),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            ClipRRect(
-              borderRadius: const BorderRadius.vertical(top: Radius.circular(12)),
-              child: Image.network(
-                data['image'] ?? '',
-                height: 180,
-                width: double.infinity,
-                fit: BoxFit.cover,
-                errorBuilder: (c, e, s) => Container(
-                  height: 180, color: Colors.grey[300],
-                  child: const Icon(Icons.broken_image, color: Colors.grey),
-                ),
-              ),
+            Image.network(
+              data['image'] ?? '',
+              height: 180,
+              width: double.infinity,
+              fit: BoxFit.cover,
+              errorBuilder: (c, e, s) => Container(height: 180, color: Colors.white24, child: const Icon(Icons.broken_image, color: Colors.white)),
             ),
             Padding(
               padding: const EdgeInsets.all(16),
@@ -238,42 +164,16 @@ class _GuestHomePageState extends State<GuestHomePage> {
                     children: [
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                        decoration: BoxDecoration(
-                          color: Colors.grey[100],
-                          borderRadius: BorderRadius.circular(4),
-                        ),
-                        child: Text(
-                          data['genre'] ?? '기타',
-                          style: const TextStyle(fontSize: 12, color: Colors.grey),
-                        ),
+                        decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(4)),
+                        child: Text(data['genre'] ?? '기타', style: const TextStyle(fontSize: 12, color: Colors.white)),
                       ),
-                      Row(
-                        children: [
-                          const Icon(Icons.location_on, size: 14, color: Colors.deepPurple),
-                          const SizedBox(width: 4),
-                          Text(
-                            _getDistance(data),
-                            style: const TextStyle(
-                              fontSize: 12, 
-                              fontWeight: FontWeight.bold, 
-                              color: Colors.deepPurple
-                            ),
-                          ),
-                        ],
-                      )
+                      Text(_getDistance(data), style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.white)),
                     ],
                   ),
                   const SizedBox(height: 8),
-                  Text(
-                    data['title'] ?? '제목 없음',
-                    style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-                  ),
+                  Text(data['title'] ?? '제목 없음', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white)),
                   const SizedBox(height: 4),
-                  Text(
-                    data['location'] ?? '',
-                    style: TextStyle(color: Colors.grey[600]),
-                    maxLines: 1, overflow: TextOverflow.ellipsis,
-                  ),
+                  Text(data['location'] ?? '', style: const TextStyle(color: Colors.white70)),
                 ],
               ),
             ),
@@ -284,90 +184,33 @@ class _GuestHomePageState extends State<GuestHomePage> {
   }
 }
 
-// 검색 기능 (기존 유지)
+// 검색 델리게이트 (기존 유지하되 배경색 등을 맞추고 싶다면 수정 가능, 일단 기능 유지)
 class FestivalSearchDelegate extends SearchDelegate {
   final Position? myPosition;
-
   FestivalSearchDelegate({this.myPosition});
-
   @override
-  String get searchFieldLabel => '축제 이름 검색';
-
+  List<Widget>? buildActions(BuildContext context) => [IconButton(icon: const Icon(Icons.clear), onPressed: () => query = '')];
   @override
-  List<Widget>? buildActions(BuildContext context) {
-    return [
-      IconButton(
-        icon: const Icon(Icons.clear),
-        onPressed: () => query = '',
-      ),
-    ];
-  }
-
-  @override
-  Widget? buildLeading(BuildContext context) {
-    return IconButton(
-      icon: const Icon(Icons.arrow_back),
-      onPressed: () => close(context, null),
-    );
-  }
-
+  Widget? buildLeading(BuildContext context) => IconButton(icon: const Icon(Icons.arrow_back), onPressed: () => close(context, null));
   @override
   Widget buildResults(BuildContext context) => _buildSearchList(context);
-
   @override
   Widget buildSuggestions(BuildContext context) => _buildSearchList(context);
 
   Widget _buildSearchList(BuildContext context) {
-    if (query.isEmpty) {
-      return const Center(child: Text("찾고 싶은 축제 이름을 입력하세요."));
-    }
-
+    if (query.isEmpty) return const Center(child: Text("축제 이름을 입력하세요."));
     return StreamBuilder<QuerySnapshot>(
-      stream: FirebaseFirestore.instance
-          .collection('festivals')
-          .orderBy('title')
-          .startAt([query])
-          .endAt(['$query\uf8ff'])
-          .snapshots(),
+      stream: FirebaseFirestore.instance.collection('festivals').orderBy('title').startAt([query]).endAt(['$query\uf8ff']).snapshots(),
       builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting) {
-          return const Center(child: CircularProgressIndicator());
-        }
-        if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
-          return const Center(child: Text("검색 결과가 없습니다."));
-        }
-
+        if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
         final docs = snapshot.data!.docs;
-
         return ListView.builder(
-          padding: const EdgeInsets.all(16),
           itemCount: docs.length,
           itemBuilder: (context, index) {
-            final doc = docs[index];
-            final data = doc.data() as Map<String, dynamic>;
-            return Card(
-              margin: const EdgeInsets.only(bottom: 10),
-              child: ListTile(
-                leading: ClipRRect(
-                  borderRadius: BorderRadius.circular(4),
-                  child: Image.network(
-                    data['image'] ?? '',
-                    width: 50, height: 50, fit: BoxFit.cover,
-                    errorBuilder: (c, e, s) => const Icon(Icons.image_not_supported),
-                  ),
-                ),
-                title: Text(data['title'] ?? '제목 없음', style: const TextStyle(fontWeight: FontWeight.bold)),
-                subtitle: Text(data['location'] ?? ''),
-                trailing: const Icon(Icons.arrow_forward_ios, size: 14),
-                onTap: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (context) => FestivalDetailPage(data: data, festivalId: doc.id),
-                    ),
-                  );
-                },
-              ),
+            final data = docs[index].data() as Map<String, dynamic>;
+            return ListTile(
+              title: Text(data['title'] ?? ''),
+              onTap: () => Navigator.push(context, MaterialPageRoute(builder: (context) => FestivalDetailPage(data: data, festivalId: docs[index].id))),
             );
           },
         );
