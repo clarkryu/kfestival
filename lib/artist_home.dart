@@ -188,12 +188,28 @@ class _ArtistHomePageState extends State<ArtistHomePage> {
         backgroundColor: Colors.white,
         foregroundColor: Colors.black,
         elevation: 0,
-        actions: [
+actions: [
+          // 1. 언어 설정 버튼 (추가됨)
+          IconButton(
+            icon: const Icon(Icons.language),
+            onPressed: () {
+               showDialog(
+                 context: context, 
+                 builder: (c) => AlertDialog(
+                   title: const Text("언어 설정"), 
+                   content: const Text("기능 준비 중입니다."), 
+                   actions: [TextButton(onPressed: ()=>Navigator.pop(c), child: const Text("확인"))]
+                 )
+               );
+            },
+          ),
+          // 2. 프로필 수정 버튼 (기존)
           IconButton(
             icon: const Icon(Icons.edit),
             tooltip: "프로필 수정",
             onPressed: _showProfileEditor,
           ),
+          // 3. 로그아웃 버튼 (기존)
           IconButton(
             icon: const Icon(Icons.logout),
             tooltip: "로그아웃",

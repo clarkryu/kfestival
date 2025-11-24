@@ -7,7 +7,7 @@ import 'package:kfestival/host_home.dart';
 import 'package:kfestival/artist_home.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:kfestival/ui/liquid_theme.dart'; // 커스텀 테마 임포트
+import 'package:kfestival/ui/liquid_theme.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -25,18 +25,16 @@ class MyApp extends StatelessWidget {
     return MaterialApp(
       title: 'K-Festival',
       debugShowCheckedModeBanner: false,
-      // 🔥 [수정] 테마 색상을 새로운 팔레트에 맞게 변경
       theme: ThemeData(
         useMaterial3: true,
-        // 배경은 LiquidBackground 위젯이 덮을 거라 기본 흰색으로 둠
         scaffoldBackgroundColor: Colors.white,
         colorScheme: ColorScheme.fromSeed(
-          seedColor: LiquidColors.deepBlue, // 찐파랑
+          seedColor: LiquidColors.deepBlue,
           primary: LiquidColors.deepBlue,
         ),
         appBarTheme: const AppBarTheme(
           backgroundColor: Colors.transparent,
-          foregroundColor: Colors.white, // 앱바 글씨 흰색
+          foregroundColor: Colors.white,
           elevation: 0,
           centerTitle: true,
           titleTextStyle: TextStyle(
@@ -45,7 +43,6 @@ class MyApp extends StatelessWidget {
             fontWeight: FontWeight.bold,
           ),
         ),
-        // 텍스트 기본 색상
         textTheme: const TextTheme(
           bodyMedium: TextStyle(color: LiquidColors.textDark),
         ),
@@ -63,8 +60,8 @@ class AuthCheck extends StatelessWidget {
     return StreamBuilder<User?>(
       stream: FirebaseAuth.instance.authStateChanges(),
       builder: (context, snapshot) {
+        // 1. 로딩 중일 때
         if (snapshot.connectionState == ConnectionState.waiting) {
-          // 로딩 중일 때도 예쁜 배경 보여주기
           return const Scaffold(
             body: LiquidBackground(
               child: Center(child: CircularProgressIndicator(color: Colors.white)),
@@ -72,6 +69,7 @@ class AuthCheck extends StatelessWidget {
           );
         }
 
+        // 2. 로그인이 되어 있는 경우 (Host, Artist, 또는 이미 익명 Guest)
         if (snapshot.hasData) {
           return FutureBuilder<DocumentSnapshot>(
             future: FirebaseFirestore.instance.collection('users').doc(snapshot.data!.uid).get(),
@@ -84,22 +82,20 @@ class AuthCheck extends StatelessWidget {
                 );
               }
 
-              if (userSnapshot.hasData && userSnapshot.data != null) {
-                // 데이터가 있으면 userType 확인
-                if (userSnapshot.data!.exists) {
-                  String userType = userSnapshot.data!.get('userType');
-                  if (userType == 'host') return const HostHomePage();
-                  if (userType == 'artist') return const ArtistHomePage();
-                  return const GuestHomePage();
-                }
+              if (userSnapshot.hasData && userSnapshot.data != null && userSnapshot.data!.exists) {
+                String userType = userSnapshot.data!.get('userType');
+                if (userType == 'host') return const HostHomePage();
+                if (userType == 'artist') return const ArtistHomePage();
               }
-              // 데이터 없으면 로그인 화면
-              return const LoginPage();
+              
+              // 유저 정보가 없거나 Guest라면 그냥 게스트 홈으로
+              return const GuestHomePage();
             },
           );
         }
-        // 로그인 안 되어 있으면 로그인 화면
-        return const LoginPage();
+
+        // 3. 🔥 [핵심 변경] 로그인이 안 되어 있으면 -> 바로 GuestHomePage로 보냄 (로그인 화면 X)
+        return const GuestHomePage();
       },
     );
   }

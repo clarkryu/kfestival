@@ -6,7 +6,9 @@ import 'package:geocoding/geocoding.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:kfestival/login.dart';
-import 'package:intl/intl.dart'; // 🔥 날짜 포맷용 패키지
+import 'package:kfestival/guest_home.dart'; 
+import 'package:intl/intl.dart'; 
+import 'package:kpostal/kpostal.dart'; // 🔥 [추가] 주소 검색 패키지
 
 class HostHomePage extends StatelessWidget {
   const HostHomePage({super.key});
@@ -20,6 +22,14 @@ class HostHomePage extends StatelessWidget {
         (route) => false,
       );
     }
+  }
+
+  void _goToGuestMode(BuildContext context) {
+    Navigator.pushAndRemoveUntil(
+      context,
+      MaterialPageRoute(builder: (context) => const GuestHomePage()),
+      (route) => false, 
+    );
   }
 
   Future<void> _updateAppStatus(String appId, String newStatus) async {
@@ -118,13 +128,17 @@ class HostHomePage extends StatelessWidget {
     final data = isEditing ? doc.data() as Map<String, dynamic> : null;
 
     final titleController = TextEditingController(text: isEditing ? (data?['title'] ?? '') : '');
+    // 🔥 [수정] 주소 입력용 컨트롤러 (이제 직접 입력 막고 검색 결과만 표시)
     final locationController = TextEditingController(text: isEditing ? (data?['location'] ?? '') : '');
     final descriptionController = TextEditingController(text: isEditing ? (data?['description'] ?? '') : '');
+    
+    // 🔥 [추가] 정확한 좌표 저장을 위한 변수
+    double selectedLat = isEditing ? (data?['latitude'] ?? 0.0) : 0.0;
+    double selectedLng = isEditing ? (data?['longitude'] ?? 0.0) : 0.0;
     
     String selectedMainGenre = isEditing ? (data?['genre'] ?? '락/밴드') : '락/밴드';
     String? currentImageUrl = data?['image'] as String?;
     
-    // 🔥 [수정] 날짜 처리 로직 (Timestamp -> DateTime)
     DateTimeRange? selectedDateRange;
     if (isEditing && data?['startDate'] != null && data?['endDate'] != null) {
       selectedDateRange = DateTimeRange(
@@ -157,11 +171,47 @@ class HostHomePage extends StatelessWidget {
             }
           }
 
-          // 🔥 [추가] 날짜 선택 함수 (DateRangePicker)
+          // 🔥 [추가] 주소 검색 함수 (Kpostal)
+          Future<void> searchAddress() async {
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => KpostalView(
+                  callback: (Kpostal result) async {
+                    // 1. 주소 텍스트 저장
+                    locationController.text = result.address;
+                    
+                    // 2. 좌표 변환 (Geocoding) - 외국인 구글맵용 핵심!
+                    try {
+                      // Kpostal이 좌표도 주긴 하지만, 확실하게 geocoding 패키지로 한 번 더 확인
+                      List<Location> locations = await locationFromAddress(result.address);
+                      if (locations.isNotEmpty) {
+                        setState(() {
+                          selectedLat = locations.first.latitude;
+                          selectedLng = locations.first.longitude;
+                        });
+                        print("좌표 찾기 성공: $selectedLat, $selectedLng");
+                      }
+                    } catch (e) {
+                      print("좌표 변환 실패 (Kpostal 데이터 사용 시도): $e");
+                      // Geocoding 실패 시 Kpostal이 주는 좌표라도 사용 (있을 경우)
+                      if (result.latitude != null && result.longitude != null) {
+                         setState(() {
+                          selectedLat = result.latitude!;
+                          selectedLng = result.longitude!;
+                        });
+                      }
+                    }
+                  },
+                ),
+              ),
+            );
+          }
+
           Future<void> pickDateRange() async {
             final DateTimeRange? picked = await showDateRangePicker(
               context: context,
-              firstDate: DateTime.now(), // 오늘 이전은 선택 불가
+              firstDate: DateTime.now(),
               lastDate: DateTime(2030),
               initialDateRange: selectedDateRange,
               builder: (context, child) {
@@ -178,7 +228,6 @@ class HostHomePage extends StatelessWidget {
             }
           }
 
-          // 날짜 텍스트 포맷팅 (예: 2025.05.23 ~ 05.25)
           String dateText = "날짜를 선택해주세요";
           if (selectedDateRange != null) {
             String start = DateFormat('yyyy.MM.dd').format(selectedDateRange!.start);
@@ -215,13 +264,35 @@ class HostHomePage extends StatelessWidget {
                       decoration: const InputDecoration(labelText: '축제 제목', border: OutlineInputBorder()),
                     ),
                     const SizedBox(height: 10),
-                    TextField(
-                      controller: locationController,
-                      decoration: const InputDecoration(labelText: '장소 (주소)', border: OutlineInputBorder()),
+                    
+                    // 🔥 [수정] 주소 입력창 (직접 입력 대신 검색 버튼 방식)
+                    GestureDetector(
+                      onTap: searchAddress, // 클릭 시 주소 검색창 열림
+                      child: AbsorbPointer( // 텍스트 입력 막기
+                        child: TextField(
+                          controller: locationController,
+                          decoration: const InputDecoration(
+                            labelText: '장소 (주소 검색)', 
+                            hintText: '터치하여 주소를 검색하세요',
+                            border: OutlineInputBorder(),
+                            suffixIcon: Icon(Icons.search, color: Colors.deepPurple),
+                            filled: true,
+                            fillColor: Colors.white,
+                          ),
+                        ),
+                      ),
                     ),
+                    if (selectedLat != 0.0) 
+                      Padding(
+                        padding: const EdgeInsets.only(top: 4, left: 4),
+                        child: Text(
+                          "✅ 좌표 확인됨 ($selectedLat, $selectedLng)", 
+                          style: const TextStyle(color: Colors.green, fontSize: 11)
+                        ),
+                      ),
+                    
                     const SizedBox(height: 10),
                     
-                    // 🔥 [변경] 날짜 선택 UI
                     GestureDetector(
                       onTap: pickDateRange,
                       child: Container(
@@ -274,7 +345,7 @@ class HostHomePage extends StatelessWidget {
                     SwitchListTile(
                       title: const Text("공연팀 모집하기"),
                       value: isRecruiting,
-                      activeColor: Colors.green,
+                      activeThumbColor: Colors.green,
                       contentPadding: EdgeInsets.zero,
                       onChanged: (val) => setState(() => isRecruiting = val),
                     ),
@@ -326,11 +397,12 @@ class HostHomePage extends StatelessWidget {
               TextButton(onPressed: () => Navigator.pop(context), child: const Text('취소')),
               ElevatedButton(
                 onPressed: () async {
-                  // 🔥 유효성 검사 (제목, 장소, 날짜 필수)
+                  // 🔥 [수정] 유효성 검사 (좌표가 0.0이면 저장 안 되게 막기 가능)
                   if (titleController.text.isEmpty || locationController.text.isEmpty || selectedDateRange == null) {
-                     ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('제목, 장소, 날짜는 필수입니다.')));
-                     return;
+                      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('제목, 장소, 날짜는 필수입니다.')));
+                      return;
                   }
+                  
                   setState(() => isProcessing = true);
 
                   try {
@@ -344,21 +416,6 @@ class HostHomePage extends StatelessWidget {
                         finalImageUrl = await ref.getDownloadURL();
                       }
 
-                      double lat = 0.0;
-                      double lng = 0.0;
-                      if (isEditing) {
-                        lat = (data?['latitude'] ?? 0.0).toDouble();
-                        lng = (data?['longitude'] ?? 0.0).toDouble();
-                      }
-                      try {
-                        List<Location> locations = await locationFromAddress(locationController.text);
-                        if (locations.isNotEmpty) {
-                          lat = locations.first.latitude;
-                          lng = locations.first.longitude;
-                        }
-                      } catch (e) { print(e); }
-
-                      // 🔥 날짜 문자열 생성 (표시용)
                       String dateString = "${DateFormat('yyyy.MM.dd').format(selectedDateRange!.start)} ~ ${DateFormat('MM.dd').format(selectedDateRange!.end)}";
 
                       final Map<String, dynamic> festivalData = {
@@ -367,12 +424,13 @@ class HostHomePage extends StatelessWidget {
                         'location': locationController.text,
                         'description': descriptionController.text,
                         'genre': selectedMainGenre,
-                        'date': dateString, // 표시용 문자열
-                        'startDate': Timestamp.fromDate(selectedDateRange!.start), // 🔥 정렬/필터용 진짜 날짜
-                        'endDate': Timestamp.fromDate(selectedDateRange!.end),     // 🔥 정렬/필터용 진짜 날짜
+                        'date': dateString,
+                        'startDate': Timestamp.fromDate(selectedDateRange!.start),
+                        'endDate': Timestamp.fromDate(selectedDateRange!.end),
                         'image': finalImageUrl,
-                        'latitude': lat,
-                        'longitude': lng,
+                        // 🔥 [수정] 검색된 정확한 좌표 저장
+                        'latitude': selectedLat,
+                        'longitude': selectedLng,
                         'isRecruiting': isRecruiting,
                         'recruitDetail': recruitDetailController.text,
                         'targetGenres': targetGenres,
@@ -441,6 +499,11 @@ class HostHomePage extends StatelessWidget {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
+        leading: IconButton(
+          icon: const Icon(Icons.home),
+          onPressed: () => _goToGuestMode(context),
+          tooltip: '관객 모드로 돌아가기',
+        ),
         title: const Text('내 축제 관리'),
         centerTitle: true,
         backgroundColor: Colors.white,
@@ -505,8 +568,9 @@ class HostHomePage extends StatelessWidget {
                                     ),
                                     PopupMenuButton<String>(
                                       onSelected: (value) {
-                                        if (value == 'edit') _showEditor(context, doc: doc);
-                                        else if (value == 'delete') _deleteFestival(context, doc.id);
+                                        if (value == 'edit') {
+                                          _showEditor(context, doc: doc);
+                                        } else if (value == 'delete') _deleteFestival(context, doc.id);
                                       },
                                       itemBuilder: (context) => [
                                         const PopupMenuItem(value: 'edit', child: Text('수정하기')),

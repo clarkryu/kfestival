@@ -8,12 +8,16 @@ class FestivalDetailPage extends StatefulWidget {
   final Map<String, dynamic> data;
   final bool isArtistMode;
   final String festivalId;
+  // 🔥 [추가] 1. 언어를 전달받을 변수
+  final String initialLang; 
 
   const FestivalDetailPage({
     super.key, 
     required this.data,
     this.festivalId = '', 
     this.isArtistMode = false,
+    // 🔥 [추가] 2. 생성자에서 받기 (기본값 'ko')
+    this.initialLang = 'ko', 
   });
 
   @override
@@ -23,10 +27,13 @@ class FestivalDetailPage extends StatefulWidget {
 class _FestivalDetailPageState extends State<FestivalDetailPage> {
   final translator = GoogleTranslator();
   
-  String _currentLang = 'ko';
+  String _currentLang = 'ko'; // 현재 화면의 언어 상태
+  
   String? _translatedTitle;
   String? _translatedDescription;
   String? _translatedRecruitDetail;
+  String? _translatedLocation;
+  
   bool _isTranslating = false;
 
   bool _isLiked = false;
@@ -37,6 +44,11 @@ class _FestivalDetailPageState extends State<FestivalDetailPage> {
   void initState() {
     super.initState();
     _checkLikeStatus();
+
+    // 🔥 [추가] 3. 들어오자마자 언어 확인! 한국어가 아니면 바로 번역 실행
+    if (widget.initialLang != 'ko') {
+      _changeLanguage(widget.initialLang);
+    }
   }
 
   void _checkLikeStatus() {
@@ -67,14 +79,51 @@ class _FestivalDetailPageState extends State<FestivalDetailPage> {
 
   final Map<String, String> _languages = {
     '원본 (Original)': 'ko',
-    'English': 'en',
-    '日本語 (Japanese)': 'ja',
-    '中文 (Chinese)': 'zh-cn',
-    'Español (Spanish)': 'es',
+    'English (영어)': 'en',
   };
 
+  Map<String, String> get _uiLabels {
+    // 현재 언어 상태(_currentLang)에 따라 라벨 반환
+    if (_currentLang == 'en') {
+      return {
+        'intro': 'Introduction',
+        'date': 'Date',
+        'location': 'Location',
+        'recruit_title': 'Artist Recruitment',
+        'recruit_genre': 'Target Genre:',
+        'recruit_detail': 'Details:',
+        'route': 'Get Directions',
+      };
+    } else {
+      return {
+        'intro': '축제 소개',
+        'date': '날짜',
+        'location': '장소',
+        'recruit_title': '아티스트 모집 요강',
+        'recruit_genre': '모집 장르:',
+        'recruit_detail': '세부 내용:',
+        'route': '길 찾기',
+      };
+    }
+  }
+
+  String _getTranslatedGenre(String genre) {
+    if (_currentLang == 'ko') return genre;
+    switch (genre) {
+      case '락/밴드': return 'Rock/Band';
+      case '재즈/클래식': return 'Jazz/Classic';
+      case '힙합/EDM': return 'Hip-hop/EDM';
+      case '발라드/R&B': return 'Ballad/R&B';
+      case '기타': return 'Others';
+      case '전체': return 'All';
+      default: return genre;
+    }
+  }
+
   Future<void> _changeLanguage(String langCode) async {
-    if (_currentLang == langCode) return;
+    // ⚠️ 중요: initState에서 호출될 때는 _currentLang이 아직 'ko'이므로 이 조건문을 통과해서 실행됨
+    // 사용자가 버튼으로 같은 언어를 누르면 무시
+    if (_currentLang == langCode && !_isTranslating) return;
 
     if (langCode == 'ko') {
       setState(() {
@@ -82,35 +131,37 @@ class _FestivalDetailPageState extends State<FestivalDetailPage> {
         _translatedTitle = null;
         _translatedDescription = null;
         _translatedRecruitDetail = null;
+        _translatedLocation = null;
       });
       return;
     }
 
     setState(() {
       _isTranslating = true;
+      _currentLang = langCode; // 🔥 UI 라벨(Introduction 등)을 위해 먼저 언어 코드 변경
     });
 
     try {
       final String title = widget.data['title'] ?? '';
       final String desc = widget.data['description'] != null && widget.data['description'].toString().isNotEmpty
           ? widget.data['description']
-          : "이 축제는 ${widget.data['location']}에서 열리는 ${widget.data['genre']} 장르의 멋진 축제입니다. 상세 내용이 곧 업데이트 될 예정입니다.";
-      final String recruit = widget.data['recruitDetail'] != null && widget.data['recruitDetail'].toString().isNotEmpty
-          ? widget.data['recruitDetail']
-          : "별도의 모집 상세 내용이 없습니다.";
+          : "이 축제는 ${widget.data['location']}에서 열리는 ${widget.data['genre']} 장르의 멋진 축제입니다.";
+      final String recruit = widget.data['recruitDetail'] ?? "별도의 모집 상세 내용이 없습니다.";
+      final String location = widget.data['location'] ?? "";
 
       var results = await Future.wait([
         translator.translate(title, to: langCode),
         translator.translate(desc, to: langCode),
         translator.translate(recruit, to: langCode),
+        translator.translate(location, to: langCode),
       ]);
 
       if (mounted) {
         setState(() {
-          _currentLang = langCode;
           _translatedTitle = results[0].text;
           _translatedDescription = results[1].text;
           _translatedRecruitDetail = results[2].text;
+          _translatedLocation = results[3].text;
           _isTranslating = false;
         });
       }
@@ -118,14 +169,10 @@ class _FestivalDetailPageState extends State<FestivalDetailPage> {
       print("번역 실패: $e");
       if (mounted) {
         setState(() => _isTranslating = false);
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("번역 서비스를 사용할 수 없습니다.")),
-        );
       }
     }
   }
 
-  // 🔥 [수정 완료] 카카오맵 웹 길찾기 연결 함수
   Future<void> _launchMaps() async {
     final double lat = (widget.data['latitude'] ?? 0.0).toDouble();
     final double lng = (widget.data['longitude'] ?? 0.0).toDouble();
@@ -140,7 +187,6 @@ class _FestivalDetailPageState extends State<FestivalDetailPage> {
       return;
     }
 
-    // 카카오맵 웹 길찾기 URL
     final Uri kakaoMapUrl = Uri.parse("https://map.kakao.com/link/to/$title,$lat,$lng");
 
     try {
@@ -148,9 +194,7 @@ class _FestivalDetailPageState extends State<FestivalDetailPage> {
         throw Exception('Could not launch maps');
       }
     } catch (e) {
-      print("지도 실행 오류: $e");
       if (mounted) {
-        // 실패 시 구글맵으로 대체 시도
         final Uri googleBackup = Uri.parse("https://www.google.com/maps/search/?api=1&query=$lat,$lng");
         await launchUrl(googleBackup, mode: LaunchMode.externalApplication);
       }
@@ -159,16 +203,24 @@ class _FestivalDetailPageState extends State<FestivalDetailPage> {
 
   @override
   Widget build(BuildContext context) {
+    // 데이터 준비
     final String displayTitle = _translatedTitle ?? widget.data['title'] ?? '제목 없음';
     
     final String originalDesc = widget.data['description'] != null && widget.data['description'].toString().isNotEmpty
           ? widget.data['description']
-          : "이 축제는 ${widget.data['location']}에서 열리는 ${widget.data['genre']} 장르의 멋진 축제입니다. 상세 내용이 곧 업데이트 될 예정입니다.";
+          : "상세 내용이 없습니다.";
     final String displayDesc = _translatedDescription ?? originalDesc;
 
     final bool isRecruiting = widget.data['isRecruiting'] ?? false;
     final String originalRecruit = widget.data['recruitDetail'] ?? "상세 내용 없음";
     final String displayRecruit = _translatedRecruitDetail ?? originalRecruit;
+    
+    final String originalGenre = widget.data['genre'] ?? '기타';
+    final String displayGenre = _getTranslatedGenre(originalGenre);
+
+    final String originalLocation = widget.data['location'] ?? '위치 정보 없음';
+    final String displayLocation = _translatedLocation ?? originalLocation;
+
     final List<dynamic> targetGenres = widget.data['targetGenres'] ?? [];
 
     return Scaffold(
@@ -179,7 +231,7 @@ class _FestivalDetailPageState extends State<FestivalDetailPage> {
             pinned: true,
             flexibleSpace: FlexibleSpaceBar(
               title: _isTranslating 
-                  ? const SizedBox()
+                  ? const SizedBox() // 번역 로딩 중엔 타이틀 숨김 (깔끔하게)
                   : Text(
                       displayTitle,
                       style: const TextStyle(
@@ -258,11 +310,10 @@ class _FestivalDetailPageState extends State<FestivalDetailPage> {
                               borderRadius: BorderRadius.circular(8),
                             ),
                             child: Text(
-                              widget.data['genre'] ?? '기타',
+                              displayGenre,
                               style: const TextStyle(color: Colors.deepPurple, fontWeight: FontWeight.bold),
                             ),
                           ),
-                          // 찜하기 버튼
                           InkWell(
                             onTap: _toggleLike,
                             borderRadius: BorderRadius.circular(20),
@@ -306,7 +357,7 @@ class _FestivalDetailPageState extends State<FestivalDetailPage> {
                         children: [
                           const Icon(Icons.location_on, size: 16, color: Colors.grey),
                           const SizedBox(width: 6),
-                          Expanded(child: Text(widget.data['location'] ?? '위치 정보 없음')),
+                          Expanded(child: Text(displayLocation)),
                         ],
                       ),
                       
@@ -315,7 +366,7 @@ class _FestivalDetailPageState extends State<FestivalDetailPage> {
                       Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
-                          const Text("축제 소개", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                          Text(_uiLabels['intro']!, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
                           Text(
                             _currentLang == 'ko' ? "한국어" : _currentLang.toUpperCase(),
                             style: const TextStyle(fontSize: 12, color: Colors.grey, fontWeight: FontWeight.bold),
@@ -337,28 +388,28 @@ class _FestivalDetailPageState extends State<FestivalDetailPage> {
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              const Row(
+                              Row(
                                 children: [
-                                  Icon(Icons.campaign, color: Colors.orange),
-                                  SizedBox(width: 8),
-                                  Text("아티스트 모집 요강", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.brown)),
+                                  const Icon(Icons.campaign, color: Colors.orange),
+                                  const SizedBox(width: 8),
+                                  Text(_uiLabels['recruit_title']!, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.brown)),
                                 ],
                               ),
                               const SizedBox(height: 12),
                               if (targetGenres.isNotEmpty) ...[
-                                const Text("모집 장르:", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Colors.grey)),
+                                Text(_uiLabels['recruit_genre']!, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Colors.grey)),
                                 const SizedBox(height: 4),
                                 Wrap(
                                   spacing: 6,
                                   children: targetGenres.map((g) => Chip(
-                                    label: Text(g.toString(), style: const TextStyle(fontSize: 11)),
+                                    label: Text(_getTranslatedGenre(g.toString()), style: const TextStyle(fontSize: 11)),
                                     backgroundColor: Colors.white,
                                     visualDensity: VisualDensity.compact,
                                   )).toList(),
                                 ),
                                 const SizedBox(height: 12),
                               ],
-                              const Text("세부 내용:", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Colors.grey)),
+                              Text(_uiLabels['recruit_detail']!, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Colors.grey)),
                               const SizedBox(height: 4),
                               Text(displayRecruit, style: const TextStyle(fontSize: 15, height: 1.4)),
                             ],
@@ -377,7 +428,7 @@ class _FestivalDetailPageState extends State<FestivalDetailPage> {
       ),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: _launchMaps,
-        label: const Text("길 찾기"),
+        label: Text(_uiLabels['route']!),
         icon: const Icon(Icons.directions),
         backgroundColor: Colors.blueAccent,
         foregroundColor: Colors.white,

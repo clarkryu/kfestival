@@ -41,10 +41,11 @@ dependencies:
   firebase_auth: ^6.1.2
   image_picker: ^1.2.1
   firebase_storage: ^13.0.4
-  geocoding: ^4.0.0
+  geocoding: ^3.0.0
   translator: ^1.0.4+1
   intl: ^0.20.2
   url_launcher: ^6.3.2
+  kpostal: ^1.1.0
 
 dev_dependencies:
   flutter_test:
