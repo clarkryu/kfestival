@@ -270,7 +270,7 @@ class _GuestHomePageState extends State<GuestHomePage> {
                         child: Text(
                           displayGenreLabel,
                           style: TextStyle(
-                            color: isSelected ? LiquidColors.deepBlue : Colors.white,
+                            color: isSelected ? LiquidColors.darkCosmicBottom : Colors.white,
                             fontWeight: FontWeight.bold,
                             fontSize: 14,
                           ),
