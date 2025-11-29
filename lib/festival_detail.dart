@@ -3,20 +3,17 @@ import 'package:translator/translator.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:kfestival/ui/liquid_theme.dart'; 
 
 class FestivalDetailPage extends StatefulWidget {
   final Map<String, dynamic> data;
-  final bool isArtistMode;
   final String festivalId;
-  // 🔥 [추가] 1. 언어를 전달받을 변수
   final String initialLang; 
 
   const FestivalDetailPage({
     super.key, 
     required this.data,
     this.festivalId = '', 
-    this.isArtistMode = false,
-    // 🔥 [추가] 2. 생성자에서 받기 (기본값 'ko')
     this.initialLang = 'ko', 
   });
 
@@ -26,26 +23,23 @@ class FestivalDetailPage extends StatefulWidget {
 
 class _FestivalDetailPageState extends State<FestivalDetailPage> {
   final translator = GoogleTranslator();
-  
-  String _currentLang = 'ko'; // 현재 화면의 언어 상태
+  String _currentLang = 'ko';
   
   String? _translatedTitle;
-  String? _translatedDescription;
-  String? _translatedRecruitDetail;
+  String? _translatedDesc;
   String? _translatedLocation;
   
   bool _isTranslating = false;
-
   bool _isLiked = false;
-  int _likeCount = 0;
   final String _uid = FirebaseAuth.instance.currentUser?.uid ?? '';
+  
+  // 슬라이더용 컨트롤러
+  int _currentImageIndex = 0;
 
   @override
   void initState() {
     super.initState();
     _checkLikeStatus();
-
-    // 🔥 [추가] 3. 들어오자마자 언어 확인! 한국어가 아니면 바로 번역 실행
     if (widget.initialLang != 'ko') {
       _changeLanguage(widget.initialLang);
     }
@@ -55,82 +49,32 @@ class _FestivalDetailPageState extends State<FestivalDetailPage> {
     List<dynamic> likes = widget.data['likes'] ?? [];
     setState(() {
       _isLiked = likes.contains(_uid);
-      _likeCount = likes.length;
     });
   }
 
   Future<void> _toggleLike() async {
-    if (_uid.isEmpty) return;
-
-    setState(() {
-      _isLiked = !_isLiked;
-      _likeCount += _isLiked ? 1 : -1;
-    });
-
-    if (widget.festivalId.isNotEmpty) {
-      final docRef = FirebaseFirestore.instance.collection('festivals').doc(widget.festivalId);
-      if (_isLiked) {
-        await docRef.update({'likes': FieldValue.arrayUnion([_uid])});
-      } else {
-        await docRef.update({'likes': FieldValue.arrayRemove([_uid])});
-      }
+    if (_uid.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("로그인이 필요합니다.")));
+      return;
     }
-  }
-
-  final Map<String, String> _languages = {
-    '원본 (Original)': 'ko',
-    'English (영어)': 'en',
-  };
-
-  Map<String, String> get _uiLabels {
-    // 현재 언어 상태(_currentLang)에 따라 라벨 반환
-    if (_currentLang == 'en') {
-      return {
-        'intro': 'Introduction',
-        'date': 'Date',
-        'location': 'Location',
-        'recruit_title': 'Artist Recruitment',
-        'recruit_genre': 'Target Genre:',
-        'recruit_detail': 'Details:',
-        'route': 'Get Directions',
-      };
+    setState(() => _isLiked = !_isLiked);
+    
+    final docRef = FirebaseFirestore.instance.collection('festivals').doc(widget.festivalId);
+    if (_isLiked) {
+      await docRef.update({'likes': FieldValue.arrayUnion([_uid])});
     } else {
-      return {
-        'intro': '축제 소개',
-        'date': '날짜',
-        'location': '장소',
-        'recruit_title': '아티스트 모집 요강',
-        'recruit_genre': '모집 장르:',
-        'recruit_detail': '세부 내용:',
-        'route': '길 찾기',
-      };
-    }
-  }
-
-  String _getTranslatedGenre(String genre) {
-    if (_currentLang == 'ko') return genre;
-    switch (genre) {
-      case '락/밴드': return 'Rock/Band';
-      case '재즈/클래식': return 'Jazz/Classic';
-      case '힙합/EDM': return 'Hip-hop/EDM';
-      case '발라드/R&B': return 'Ballad/R&B';
-      case '기타': return 'Others';
-      case '전체': return 'All';
-      default: return genre;
+      await docRef.update({'likes': FieldValue.arrayRemove([_uid])});
     }
   }
 
   Future<void> _changeLanguage(String langCode) async {
-    // ⚠️ 중요: initState에서 호출될 때는 _currentLang이 아직 'ko'이므로 이 조건문을 통과해서 실행됨
-    // 사용자가 버튼으로 같은 언어를 누르면 무시
-    if (_currentLang == langCode && !_isTranslating) return;
+    if (_currentLang == langCode) return;
 
     if (langCode == 'ko') {
       setState(() {
         _currentLang = 'ko';
         _translatedTitle = null;
-        _translatedDescription = null;
-        _translatedRecruitDetail = null;
+        _translatedDesc = null;
         _translatedLocation = null;
       });
       return;
@@ -138,301 +82,243 @@ class _FestivalDetailPageState extends State<FestivalDetailPage> {
 
     setState(() {
       _isTranslating = true;
-      _currentLang = langCode; // 🔥 UI 라벨(Introduction 등)을 위해 먼저 언어 코드 변경
+      _currentLang = langCode;
     });
 
     try {
-      final String title = widget.data['title'] ?? '';
-      final String desc = widget.data['description'] != null && widget.data['description'].toString().isNotEmpty
-          ? widget.data['description']
-          : "이 축제는 ${widget.data['location']}에서 열리는 ${widget.data['genre']} 장르의 멋진 축제입니다.";
-      final String recruit = widget.data['recruitDetail'] ?? "별도의 모집 상세 내용이 없습니다.";
-      final String location = widget.data['location'] ?? "";
-
       var results = await Future.wait([
-        translator.translate(title, to: langCode),
-        translator.translate(desc, to: langCode),
-        translator.translate(recruit, to: langCode),
-        translator.translate(location, to: langCode),
+        translator.translate(widget.data['title'] ?? '', to: langCode),
+        translator.translate(widget.data['description'] ?? '', to: langCode),
+        translator.translate(widget.data['location'] ?? '', to: langCode),
       ]);
 
       if (mounted) {
         setState(() {
           _translatedTitle = results[0].text;
-          _translatedDescription = results[1].text;
-          _translatedRecruitDetail = results[2].text;
-          _translatedLocation = results[3].text;
+          _translatedDesc = results[1].text;
+          _translatedLocation = results[2].text;
           _isTranslating = false;
         });
       }
     } catch (e) {
-      print("번역 실패: $e");
-      if (mounted) {
-        setState(() => _isTranslating = false);
-      }
+      if (mounted) setState(() => _isTranslating = false);
     }
   }
 
   Future<void> _launchMaps() async {
     final double lat = (widget.data['latitude'] ?? 0.0).toDouble();
     final double lng = (widget.data['longitude'] ?? 0.0).toDouble();
-    final String title = widget.data['title'] ?? '목적지';
-
-    if (lat == 0.0 || lng == 0.0) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("위치 정보가 정확하지 않습니다.")),
-        );
-      }
-      return;
-    }
-
-    final Uri kakaoMapUrl = Uri.parse("https://map.kakao.com/link/to/$title,$lat,$lng");
-
-    try {
-      if (!await launchUrl(kakaoMapUrl, mode: LaunchMode.externalApplication)) {
-        throw Exception('Could not launch maps');
-      }
-    } catch (e) {
-      if (mounted) {
-        final Uri googleBackup = Uri.parse("https://www.google.com/maps/search/?api=1&query=$lat,$lng");
-        await launchUrl(googleBackup, mode: LaunchMode.externalApplication);
-      }
+    final String googleUrl = 'https://www.google.com/maps/search/?api=1&query=$lat,$lng';
+    
+    if (await canLaunchUrl(Uri.parse(googleUrl))) {
+      await launchUrl(Uri.parse(googleUrl), mode: LaunchMode.externalApplication);
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("지도를 열 수 없습니다.")));
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    // 데이터 준비
-    final String displayTitle = _translatedTitle ?? widget.data['title'] ?? '제목 없음';
+    final String displayTitle = _translatedTitle ?? widget.data['title'] ?? 'No Title';
+    final String displayDesc = _translatedDesc ?? widget.data['description'] ?? 'No Description';
+    final String displayLocation = _translatedLocation ?? widget.data['location'] ?? 'Unknown';
     
-    final String originalDesc = widget.data['description'] != null && widget.data['description'].toString().isNotEmpty
-          ? widget.data['description']
-          : "상세 내용이 없습니다.";
-    final String displayDesc = _translatedDescription ?? originalDesc;
-
-    final bool isRecruiting = widget.data['isRecruiting'] ?? false;
-    final String originalRecruit = widget.data['recruitDetail'] ?? "상세 내용 없음";
-    final String displayRecruit = _translatedRecruitDetail ?? originalRecruit;
-    
-    final String originalGenre = widget.data['genre'] ?? '기타';
-    final String displayGenre = _getTranslatedGenre(originalGenre);
-
-    final String originalLocation = widget.data['location'] ?? '위치 정보 없음';
-    final String displayLocation = _translatedLocation ?? originalLocation;
-
-    final List<dynamic> targetGenres = widget.data['targetGenres'] ?? [];
+    // 🔥 이미지 리스트 처리
+    List<String> images = [];
+    if (widget.data['images'] != null) {
+      images = List<String>.from(widget.data['images']);
+    } else if (widget.data['image'] != null && widget.data['image'].toString().isNotEmpty) {
+      images.add(widget.data['image']);
+    }
 
     return Scaffold(
-      body: CustomScrollView(
-        slivers: [
-          SliverAppBar(
-            expandedHeight: 300.0,
-            pinned: true,
-            flexibleSpace: FlexibleSpaceBar(
-              title: _isTranslating 
-                  ? const SizedBox() // 번역 로딩 중엔 타이틀 숨김 (깔끔하게)
-                  : Text(
-                      displayTitle,
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 16,
-                        shadows: [Shadow(color: Colors.black, blurRadius: 10)],
-                      ),
-                    ),
-              background: Stack(
-                fit: StackFit.expand,
-                children: [
-                  Image.network(
-                    widget.data['image'] ?? '',
-                    fit: BoxFit.cover,
-                    errorBuilder: (c, e, s) => Container(color: Colors.grey),
-                  ),
-                  const DecoratedBox(
-                    decoration: BoxDecoration(
-                      gradient: LinearGradient(
-                        begin: Alignment.topCenter,
-                        end: Alignment.bottomCenter,
-                        colors: [Colors.transparent, Colors.black54],
-                        stops: [0.6, 1.0],
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            actions: [
-              PopupMenuButton<String>(
-                icon: const Icon(Icons.language, color: Colors.white),
-                onSelected: _changeLanguage,
-                itemBuilder: (BuildContext context) {
-                  return _languages.entries.map((entry) {
-                    return PopupMenuItem<String>(
-                      value: entry.value,
-                      child: Row(
-                        children: [
-                          if (_currentLang == entry.value)
-                            const Icon(Icons.check, size: 16, color: Colors.deepPurple)
-                          else
-                            const SizedBox(width: 16),
-                          const SizedBox(width: 8),
-                          Text(entry.key),
-                        ],
-                      ),
-                    );
-                  }).toList();
-                },
-              ),
-              const SizedBox(width: 10),
-            ],
+      extendBodyBehindAppBar: true,
+      appBar: AppBar(
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back_ios, color: Colors.white, shadows: [Shadow(color: Colors.black, blurRadius: 10)]),
+          onPressed: () => Navigator.pop(context),
+        ),
+        actions: [
+          IconButton(
+            icon: Icon(_isLiked ? Icons.favorite : Icons.favorite_border, color: _isLiked ? Colors.pinkAccent : Colors.white, shadows: const [Shadow(color: Colors.black, blurRadius: 10)]),
+            onPressed: _toggleLike,
           ),
-
-          SliverList(
-            delegate: SliverChildListDelegate([
-              Padding(
-                padding: const EdgeInsets.all(20.0),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    if (_isTranslating)
-                      const Padding(
-                        padding: EdgeInsets.symmetric(vertical: 20),
-                        child: Center(child: CircularProgressIndicator()),
-                      )
-                    else ...[
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                            decoration: BoxDecoration(
-                              color: Colors.deepPurple[50],
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                            child: Text(
-                              displayGenre,
-                              style: const TextStyle(color: Colors.deepPurple, fontWeight: FontWeight.bold),
-                            ),
-                          ),
-                          InkWell(
-                            onTap: _toggleLike,
-                            borderRadius: BorderRadius.circular(20),
-                            child: Container(
-                              padding: const EdgeInsets.all(8),
-                              child: Row(
-                                children: [
-                                  Icon(
-                                    _isLiked ? Icons.favorite : Icons.favorite_border,
-                                    color: _isLiked ? Colors.red : Colors.grey,
-                                    size: 28,
-                                  ),
-                                  const SizedBox(width: 4),
-                                  Text(
-                                    "$_likeCount",
-                                    style: TextStyle(
-                                      color: _isLiked ? Colors.red : Colors.grey,
-                                      fontWeight: FontWeight.bold,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 16),
-
-                      Text(displayTitle, style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
-                      const SizedBox(height: 8),
-
-                      Row(
-                        children: [
-                          const Icon(Icons.calendar_today, size: 16, color: Colors.grey),
-                          const SizedBox(width: 6),
-                          Text(widget.data['date'] ?? '날짜 미정'),
-                        ],
-                      ),
-                      const SizedBox(height: 8),
-                      Row(
-                        children: [
-                          const Icon(Icons.location_on, size: 16, color: Colors.grey),
-                          const SizedBox(width: 6),
-                          Expanded(child: Text(displayLocation)),
-                        ],
-                      ),
-                      
-                      const Divider(height: 40),
-
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Text(_uiLabels['intro']!, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-                          Text(
-                            _currentLang == 'ko' ? "한국어" : _currentLang.toUpperCase(),
-                            style: const TextStyle(fontSize: 12, color: Colors.grey, fontWeight: FontWeight.bold),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 10),
-                      Text(displayDesc, style: const TextStyle(fontSize: 16, height: 1.5, color: Colors.black87)),
-
-                      if (isRecruiting && widget.isArtistMode) ...[
-                        const Divider(height: 40),
-                        Container(
-                          padding: const EdgeInsets.all(16),
-                          decoration: BoxDecoration(
-                            color: Colors.orange[50],
-                            borderRadius: BorderRadius.circular(12),
-                            border: Border.all(color: Colors.orange.withOpacity(0.3)),
-                          ),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Row(
-                                children: [
-                                  const Icon(Icons.campaign, color: Colors.orange),
-                                  const SizedBox(width: 8),
-                                  Text(_uiLabels['recruit_title']!, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.brown)),
-                                ],
-                              ),
-                              const SizedBox(height: 12),
-                              if (targetGenres.isNotEmpty) ...[
-                                Text(_uiLabels['recruit_genre']!, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Colors.grey)),
-                                const SizedBox(height: 4),
-                                Wrap(
-                                  spacing: 6,
-                                  children: targetGenres.map((g) => Chip(
-                                    label: Text(_getTranslatedGenre(g.toString()), style: const TextStyle(fontSize: 11)),
-                                    backgroundColor: Colors.white,
-                                    visualDensity: VisualDensity.compact,
-                                  )).toList(),
-                                ),
-                                const SizedBox(height: 12),
-                              ],
-                              Text(_uiLabels['recruit_detail']!, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Colors.grey)),
-                              const SizedBox(height: 4),
-                              Text(displayRecruit, style: const TextStyle(fontSize: 15, height: 1.4)),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ],
-                    
-                    const SizedBox(height: 100),
-                  ],
-                ),
-              ),
-            ]),
+          PopupMenuButton<String>(
+            icon: const Icon(Icons.language, color: Colors.white, shadows: [Shadow(color: Colors.black, blurRadius: 10)]),
+            onSelected: _changeLanguage,
+            itemBuilder: (context) => ['ko', 'en', 'ja', 'zh'].map((lang) => PopupMenuItem(value: lang, child: Text(lang.toUpperCase()))).toList(),
           ),
         ],
       ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: _launchMaps,
-        label: Text(_uiLabels['route']!),
-        icon: const Icon(Icons.directions),
-        backgroundColor: Colors.blueAccent,
-        foregroundColor: Colors.white,
+      body: LiquidBackground(
+        child: SingleChildScrollView(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // 🔥 [수정] 이미지 슬라이더 (PageView)
+              Stack(
+                alignment: Alignment.bottomCenter,
+                children: [
+                  SizedBox(
+                    height: 400, // 높이를 조금 더 키움
+                    width: double.infinity,
+                    child: images.isNotEmpty
+                      ? PageView.builder(
+                          itemCount: images.length,
+                          onPageChanged: (index) {
+                            setState(() => _currentImageIndex = index);
+                          },
+                          itemBuilder: (context, index) {
+                            return Image.network(
+                              images[index], 
+                              fit: BoxFit.cover,
+                              errorBuilder: (c, e, s) => const Center(child: Icon(Icons.image_not_supported, size: 50, color: Colors.white54)),
+                            );
+                          },
+                        )
+                      : const Center(child: Icon(Icons.image_not_supported, size: 50, color: Colors.white54)),
+                  ),
+                  // 하단 그라데이션 (글씨 잘 보이게)
+                  Container(
+                    height: 100,
+                    decoration: const BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.topCenter,
+                        end: Alignment.bottomCenter,
+                        colors: [Colors.transparent, LiquidColors.darkCosmicTop],
+                      ),
+                    ),
+                  ),
+                  // 인디케이터 (점)
+                  if (images.length > 1)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 20),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: images.asMap().entries.map((entry) {
+                          return Container(
+                            width: 8.0,
+                            height: 8.0,
+                            margin: const EdgeInsets.symmetric(horizontal: 4.0),
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              color: _currentImageIndex == entry.key
+                                  ? LiquidColors.cyanAccent
+                                  : Colors.white.withOpacity(0.4),
+                            ),
+                          );
+                        }).toList(),
+                      ),
+                    ),
+                ],
+              ),
+              
+              // 상세 정보
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 20.0),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // 카테고리 뱃지
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: LiquidColors.cyanAccent.withOpacity(0.2),
+                        borderRadius: BorderRadius.circular(20),
+                        border: Border.all(color: LiquidColors.cyanAccent),
+                      ),
+                      child: Text(
+                        widget.data['subCategory']?.toString().toUpperCase() ?? 'EVENT',
+                        style: const TextStyle(color: LiquidColors.cyanAccent, fontWeight: FontWeight.bold, fontSize: 12),
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    
+                    _isTranslating 
+                        ? const SizedBox(height: 30, width: 30, child: CircularProgressIndicator(color: Colors.white))
+                        : Text(displayTitle, style: const TextStyle(color: Colors.white, fontSize: 28, fontWeight: FontWeight.bold, height: 1.2)),
+                    
+                    const SizedBox(height: 24),
+                    
+                    _buildInfoRow(Icons.calendar_today, widget.data['date'] ?? '날짜 미정'),
+                    const SizedBox(height: 12),
+                    _buildInfoRow(Icons.location_on, displayLocation),
+                    
+                    const SizedBox(height: 30),
+                    const Divider(color: Colors.white24),
+                    const SizedBox(height: 20),
+                    
+                    const Text("About", style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+                    const SizedBox(height: 10),
+                    Text(
+                      displayDesc,
+                      style: const TextStyle(color: Colors.white70, fontSize: 16, height: 1.6),
+                    ),
+                    
+                    const SizedBox(height: 100), 
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
+      
+      // 하단 버튼
+      bottomNavigationBar: Container(
+        padding: const EdgeInsets.all(20),
+        decoration: const BoxDecoration(
+          color: LiquidColors.darkCosmicBottom,
+          border: Border(top: BorderSide(color: Colors.white12)),
+        ),
+        child: Row(
+          children: [
+            Expanded(
+              child: OutlinedButton.icon(
+                onPressed: _launchMaps,
+                icon: const Icon(Icons.map, color: Colors.white),
+                label: const Text("Map", style: TextStyle(color: Colors.white)),
+                style: OutlinedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(vertical: 16),
+                  side: const BorderSide(color: Colors.white30),
+                ),
+              ),
+            ),
+            const SizedBox(width: 16),
+            Expanded(
+              flex: 2,
+              child: ElevatedButton(
+                onPressed: () {
+                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("예매 기능 준비 중입니다! 🎟️")));
+                },
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: LiquidColors.cyanAccent,
+                  foregroundColor: Colors.black,
+                  padding: const EdgeInsets.symmetric(vertical: 16),
+                  elevation: 10,
+                  shadowColor: LiquidColors.cyanAccent.withOpacity(0.5),
+                ),
+                child: const Text("Book Now", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildInfoRow(IconData icon, String text) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Icon(icon, color: Colors.white54, size: 20),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Text(text, style: const TextStyle(color: Colors.white, fontSize: 16)),
+        ),
+      ],
     );
   }
 }

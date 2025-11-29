@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:kfestival/ui/liquid_theme.dart';
-import 'package:kfestival/guest_list.dart';
+import 'package:kfestival/guest_list.dart'; // 🔥 여기가 핵심! 리스트 및 검색 델리게이트 가져오기
 import 'package:kfestival/login.dart';
 import 'package:kfestival/utils/k_localization.dart';
 
@@ -14,12 +14,12 @@ class GuestMainPage extends StatefulWidget {
 class _GuestMainPageState extends State<GuestMainPage> {
   String _lang = 'en'; // 기본 언어
 
-  // 🔥 [수정] 새로운 아트 카테고리 정의
+  // 아트 카테고리 정의 (4대장)
   final List<Map<String, dynamic>> _categories = [
-    {'id': 'kpop', 'icon': Icons.music_note, 'color': Colors.pinkAccent}, // K-Pop
-    {'id': 'musical', 'icon': Icons.theater_comedy, 'color': Colors.orangeAccent}, // 연극/뮤지컬
-    {'id': 'exhibition', 'icon': Icons.palette, 'color': Colors.cyanAccent}, // 전시
-    {'id': 'performance', 'icon': Icons.auto_awesome, 'color': Colors.purpleAccent}, // 퍼포먼스
+    {'id': 'kpop', 'icon': Icons.music_note, 'color': Colors.pinkAccent},
+    {'id': 'musical', 'icon': Icons.theater_comedy, 'color': Colors.orangeAccent},
+    {'id': 'exhibition', 'icon': Icons.palette, 'color': Colors.cyanAccent},
+    {'id': 'performance', 'icon': Icons.auto_awesome, 'color': Colors.purpleAccent},
   ];
 
   void _showLanguageDialog() {
@@ -52,10 +52,22 @@ class _GuestMainPageState extends State<GuestMainPage> {
         backgroundColor: Colors.transparent,
         elevation: 0,
         actions: [
+          // 1. 언어 변경 버튼
           IconButton(
             icon: const Icon(Icons.language, color: Colors.white),
             onPressed: _showLanguageDialog,
           ),
+          // 2. 🔥 [연결] 통합 검색 버튼 -> guest_list.dart의 델리게이트 호출
+          IconButton(
+            icon: const Icon(Icons.search, color: Colors.white),
+            onPressed: () {
+              showSearch(
+                context: context,
+                delegate: FestivalSearchDelegate(lang: _lang), 
+              );
+            },
+          ),
+          // 3. 파트너 로그인 버튼
           Padding(
             padding: const EdgeInsets.only(right: 16.0),
             child: LiquidGlassCard(
@@ -73,7 +85,6 @@ class _GuestMainPageState extends State<GuestMainPage> {
                   children: [
                     const Icon(Icons.person, color: Colors.white, size: 18),
                     const SizedBox(width: 8),
-                    // 🔥 이제 단어장에서 'Partner Login'을 제대로 가져옵니다
                     Text(KLocalization.get(_lang, 'btn_partner_login'), style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12)),
                   ],
                 ),
@@ -88,7 +99,7 @@ class _GuestMainPageState extends State<GuestMainPage> {
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                // 코스믹 엠블럼 로고 (기존 유지)
+                // K-PODO 로고
                 Container(
                   width: 160,
                   height: 160,
@@ -132,7 +143,7 @@ class _GuestMainPageState extends State<GuestMainPage> {
                 const Text("Point of Do", style: TextStyle(color: Colors.white54, fontSize: 14, letterSpacing: 2.0)),
                 const SizedBox(height: 40),
 
-                // 🔥 새로운 카테고리 그리드
+                // 카테고리 그리드
                 Expanded(
                   child: GridView.builder(
                     padding: const EdgeInsets.all(24),
@@ -179,7 +190,6 @@ class _GuestMainPageState extends State<GuestMainPage> {
             child: Icon(icon, size: 40, color: accentColor),
           ),
           const SizedBox(height: 16),
-          // 단어장에서 새로운 카테고리 이름 가져오기
           Text(
             KLocalization.getCategory(_lang, category),
             style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),

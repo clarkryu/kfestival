@@ -12,7 +12,7 @@ import 'package:kpostal/kpostal.dart';
 import 'package:kfestival/login.dart';
 import 'package:kfestival/guest_main.dart'; 
 import 'package:kfestival/ui/liquid_theme.dart'; 
-import 'package:kfestival/utils/k_localization.dart'; // 카테고리 이름 가져오기용
+import 'package:kfestival/utils/k_localization.dart'; 
 
 class HostHomePage extends StatefulWidget {
   const HostHomePage({super.key});
@@ -22,13 +22,41 @@ class HostHomePage extends StatefulWidget {
 }
 
 class _HostHomePageState extends State<HostHomePage> {
-  // 🔥 [수정] 게스트 화면과 100% 일치하는 카테고리 정의 (키값 기준)
   final Map<String, List<String>> _categoryMap = {
     'kpop': ['idol', 'hiphop'],
     'musical': ['theater', 'big_musical'],
     'exhibition': ['gallery', 'museum'],
     'performance': ['nanta', 'magic'],
   };
+
+  final Map<String, String> _langOptions = {
+    'eng_sub': '🇺🇸 Eng Sub',
+    'jp_sub': '🇯🇵 JP Sub',
+    'cn_sub': '🇨🇳 CN Sub',
+    'non_verbal': '🤐 Non-verbal',
+  };
+
+  // 🔥 [NEW] 호스트 상태 확인 변수
+  String _hostStatus = 'pending'; 
+
+  @override
+  void initState() {
+    super.initState();
+    _checkHostStatus(); // 들어오자마자 내 상태(active/pending) 확인
+  }
+
+  // 🔥 [NEW] 내 상태 DB에서 가져오기
+  Future<void> _checkHostStatus() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user != null) {
+      final doc = await FirebaseFirestore.instance.collection('users').doc(user.uid).get();
+      if (doc.exists) {
+        setState(() {
+          _hostStatus = doc.data()?['status'] ?? 'pending';
+        });
+      }
+    }
+  }
 
   void _logout() async {
     await FirebaseAuth.instance.signOut();
@@ -47,7 +75,66 @@ class _HostHomePageState extends State<HostHomePage> {
     );
   }
 
-  // 🔥 [삭제됨] 지원자 관리 함수 (_showApplicants) -> 아티스트 모집 기능 삭제로 불필요
+  // 🔥 [NEW] 글쓰기 버튼 클릭 시 검문소 역할
+  void _handleWriteButton() {
+    if (_hostStatus == 'pending') {
+      showDialog(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          backgroundColor: LiquidColors.darkCosmicMid,
+          title: const Row(children: [Icon(Icons.lock_clock, color: Colors.orangeAccent), SizedBox(width: 10), Text("승인 대기 중", style: TextStyle(color: Colors.white))]),
+          content: const Text(
+            "제출하신 서류를 관리자가 검토 중입니다.\n승인이 완료되면 공연을 등록하실 수 있습니다.\n(영업일 기준 1~2일 소요)",
+            style: TextStyle(color: Colors.white70),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text("확인", style: TextStyle(color: LiquidColors.cyanAccent)),
+            ),
+          ],
+        ),
+      );
+    } else {
+      // 승인된(active) 유저만 에디터 열기
+      _showEditor(context);
+    }
+  }
+
+  Future<void> _deleteFestival(String docId) async {
+    return showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: LiquidColors.darkCosmicMid,
+        title: const Text("공연 삭제", style: TextStyle(color: Colors.white)),
+        content: const Text("정말로 이 공연 정보를 삭제하시겠습니까?\n복구할 수 없습니다.", style: TextStyle(color: Colors.white70)),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text("취소", style: TextStyle(color: Colors.white54)),
+          ),
+          TextButton(
+            onPressed: () async {
+              await FirebaseFirestore.instance.collection('festivals').doc(docId).delete();
+              if (ctx.mounted) {
+                Navigator.pop(ctx);
+                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("삭제되었습니다.")));
+              }
+            },
+            child: const Text("삭제", style: TextStyle(color: Colors.redAccent, fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _toggleActive(String docId, bool currentStatus) async {
+    await FirebaseFirestore.instance.collection('festivals').doc(docId).update({
+      'isActive': !currentStatus,
+    });
+    String msg = !currentStatus ? "공연이 공개되었습니다. (Active)" : "공연이 비공개 처리되었습니다. (Inactive)";
+    if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+  }
 
   // 축제 등록/수정 에디터
   Future<void> _showEditor(BuildContext context, {DocumentSnapshot? doc}) async {
@@ -57,15 +144,20 @@ class _HostHomePageState extends State<HostHomePage> {
     final titleController = TextEditingController(text: data?['title'] ?? '');
     final locationController = TextEditingController(text: data?['location'] ?? '');
     final descriptionController = TextEditingController(text: data?['description'] ?? '');
-    
-    // 🔥 [삭제됨] recruitDetailController (모집 요강 입력창 삭제)
 
     double selectedLat = (data?['latitude'] ?? 0.0).toDouble();
     double selectedLng = (data?['longitude'] ?? 0.0).toDouble();
-    String? currentImageUrl = data?['image'];
     
-    File? newImageFile;
-    Uint8List? newImageBytes;
+    List<dynamic> currentImageUrls = [];
+    if (data != null) {
+      if (data['images'] != null) {
+        currentImageUrls = List.from(data['images']);
+      } else if (data['image'] != null && data['image'].toString().isNotEmpty) {
+        currentImageUrls.add(data['image']);
+      }
+    }
+
+    List<XFile> newImages = [];
     
     DateTimeRange? selectedDateRange;
     if (isEditing && data?['startDate'] != null && data?['endDate'] != null) {
@@ -89,8 +181,14 @@ class _HostHomePageState extends State<HostHomePage> {
         selectedSubCategory = _categoryMap[selectedCategory]!.first;
       }
     }
+    
+    bool isActive = data?['isActive'] ?? true;
 
-    // 🔥 [삭제됨] isRecruiting 변수 삭제
+    // 언어 지원 옵션 초기화
+    List<String> selectedLanguages = [];
+    if (data != null && data['languageSupport'] != null) {
+      selectedLanguages = List<String>.from(data['languageSupport']);
+    }
 
     bool isProcessing = false;
 
@@ -144,31 +242,98 @@ class _HostHomePageState extends State<HostHomePage> {
             if (picked != null) setState(() => selectedDateRange = picked);
           }
 
-          Future<void> pickImage() async {
-            final pickedFile = await ImagePicker().pickImage(source: ImageSource.gallery);
-            if (pickedFile != null) {
-              if (kIsWeb) {
-                final bytes = await pickedFile.readAsBytes();
-                setState(() => newImageBytes = bytes);
-              } else {
-                setState(() => newImageFile = File(pickedFile.path));
+          Future<void> pickImages() async {
+            try {
+              final List<XFile> pickedFiles = await ImagePicker().pickMultiImage(imageQuality: 70);
+              if (pickedFiles.isNotEmpty) {
+                int totalCount = currentImageUrls.length + newImages.length + pickedFiles.length;
+                if (totalCount > 10) {
+                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("사진은 최대 10장까지 등록 가능합니다.")));
+                  return;
+                }
+                List<XFile> validFiles = [];
+                for (var file in pickedFiles) {
+                  int sizeInBytes = await file.length();
+                  double sizeInMB = sizeInBytes / (1024 * 1024);
+                  if (sizeInMB > 5.0) {
+                    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("${file.name}은 5MB를 초과하여 제외되었습니다.")));
+                  } else {
+                    validFiles.add(file);
+                  }
+                }
+                setState(() {
+                  newImages.addAll(validFiles);
+                });
               }
+            } catch (e) {
+              print("이미지 선택 오류: $e");
             }
           }
 
-          Widget buildImageWidget() {
-            if (kIsWeb && newImageBytes != null) {
-              return Image.memory(newImageBytes!, fit: BoxFit.cover);
-            } else if (!kIsWeb && newImageFile != null) {
-              return Image.file(newImageFile!, fit: BoxFit.cover);
-            } else if (currentImageUrl != null && currentImageUrl.isNotEmpty) {
-              return Image.network(currentImageUrl, fit: BoxFit.cover);
-            }
-            return const Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center, 
-                children: [Icon(Icons.add_a_photo, color: Colors.white, size: 40), Text("포스터 등록", style: TextStyle(color: Colors.white))]
-              )
+          Widget buildImageGallery() {
+            int totalCount = currentImageUrls.length + newImages.length;
+            return Container(
+              height: 120,
+              decoration: BoxDecoration(
+                color: Colors.black26,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: Colors.white24),
+              ),
+              child: ListView(
+                scrollDirection: Axis.horizontal,
+                padding: const EdgeInsets.all(10),
+                children: [
+                  if (totalCount < 10)
+                    GestureDetector(
+                      onTap: pickImages,
+                      child: Container(
+                        width: 100,
+                        margin: const EdgeInsets.only(right: 10),
+                        decoration: BoxDecoration(
+                          color: Colors.white10,
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: LiquidColors.cyanAccent.withOpacity(0.5)),
+                        ),
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            const Icon(Icons.add_a_photo, color: LiquidColors.cyanAccent),
+                            const SizedBox(height: 4),
+                            Text("${totalCount}/10", style: const TextStyle(color: Colors.white70, fontSize: 12)),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ...currentImageUrls.asMap().entries.map((entry) {
+                    int idx = entry.key;
+                    String url = entry.value;
+                    return Stack(
+                      children: [
+                        Container(
+                          width: 100,
+                          margin: const EdgeInsets.only(right: 10),
+                          child: ClipRRect(borderRadius: BorderRadius.circular(8), child: Image.network(url, fit: BoxFit.cover)),
+                        ),
+                        Positioned(top: 2, right: 12, child: GestureDetector(onTap: () => setState(() => currentImageUrls.removeAt(idx)), child: const CircleAvatar(radius: 10, backgroundColor: Colors.red, child: Icon(Icons.close, size: 14, color: Colors.white)))),
+                      ],
+                    );
+                  }).toList(),
+                  ...newImages.asMap().entries.map((entry) {
+                    int idx = entry.key;
+                    XFile file = entry.value;
+                    return Stack(
+                      children: [
+                        Container(
+                          width: 100,
+                          margin: const EdgeInsets.only(right: 10),
+                          child: ClipRRect(borderRadius: BorderRadius.circular(8), child: kIsWeb ? Image.network(file.path, fit: BoxFit.cover) : Image.file(File(file.path), fit: BoxFit.cover)),
+                        ),
+                        Positioned(top: 2, right: 12, child: GestureDetector(onTap: () => setState(() => newImages.removeAt(idx)), child: const CircleAvatar(radius: 10, backgroundColor: Colors.red, child: Icon(Icons.close, size: 14, color: Colors.white)))),
+                      ],
+                    );
+                  }).toList(),
+                ],
+              ),
             );
           }
 
@@ -201,24 +366,27 @@ class _HostHomePageState extends State<HostHomePage> {
                                   ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('제목, 장소, 날짜는 필수입니다.')));
                                   return;
                                 }
+                                if (currentImageUrls.isEmpty && newImages.isEmpty) {
+                                   ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('최소 1장의 사진을 등록해주세요.')));
+                                   return;
+                                }
                                 setState(() => isProcessing = true);
                                 try {
                                   final user = FirebaseAuth.instance.currentUser;
                                   if (user != null) {
-                                    String finalImageUrl = currentImageUrl ?? '';
-                                    
-                                    try {
-                                      if (kIsWeb && newImageBytes != null) {
-                                        final ref = FirebaseStorage.instance.ref().child('festivals/${DateTime.now().millisecondsSinceEpoch}.jpg');
-                                        await ref.putData(newImageBytes!, SettableMetadata(contentType: 'image/jpeg'));
-                                        finalImageUrl = await ref.getDownloadURL();
-                                      } else if (!kIsWeb && newImageFile != null) {
-                                        final ref = FirebaseStorage.instance.ref().child('festivals/${DateTime.now().millisecondsSinceEpoch}.jpg');
-                                        await ref.putFile(newImageFile!);
-                                        finalImageUrl = await ref.getDownloadURL();
-                                      }
-                                    } catch (imgError) {
-                                      print("이미지 업로드 실패: $imgError");
+                                    List<String> finalImageUrls = [...List<String>.from(currentImageUrls)];
+                                    for (var imageFile in newImages) {
+                                      try {
+                                        final ref = FirebaseStorage.instance.ref().child('festivals/${DateTime.now().millisecondsSinceEpoch}_${imageFile.name}');
+                                        if (kIsWeb) {
+                                          final bytes = await imageFile.readAsBytes();
+                                          await ref.putData(bytes, SettableMetadata(contentType: 'image/jpeg'));
+                                        } else {
+                                          await ref.putFile(File(imageFile.path));
+                                        }
+                                        String url = await ref.getDownloadURL();
+                                        finalImageUrls.add(url);
+                                      } catch (e) { print("이미지 업로드 실패: $e"); }
                                     }
 
                                     final festivalData = {
@@ -231,10 +399,12 @@ class _HostHomePageState extends State<HostHomePage> {
                                       'date': "${DateFormat('yyyy.MM.dd').format(selectedDateRange!.start)} ~ ${DateFormat('MM.dd').format(selectedDateRange!.end)}",
                                       'startDate': Timestamp.fromDate(selectedDateRange!.start),
                                       'endDate': Timestamp.fromDate(selectedDateRange!.end),
-                                      'image': finalImageUrl,
+                                      'images': finalImageUrls, 
+                                      'image': finalImageUrls.isNotEmpty ? finalImageUrls[0] : '', 
                                       'latitude': selectedLat,
                                       'longitude': selectedLng,
-                                      // 🔥 [삭제됨] isRecruiting, recruitDetail 필드 삭제
+                                      'isActive': isActive,
+                                      'languageSupport': selectedLanguages, 
                                       'createdAt': isEditing ? data!['createdAt'] : FieldValue.serverTimestamp(),
                                     };
 
@@ -263,18 +433,127 @@ class _HostHomePageState extends State<HostHomePage> {
                         padding: const EdgeInsets.symmetric(horizontal: 20),
                         child: Column(
                           children: [
-                            GestureDetector(
-                              onTap: pickImage,
-                              child: LiquidGlassCard(
-                                height: 200,
-                                width: double.infinity,
-                                child: buildImageWidget(),
-                              ),
-                            ),
+                            buildImageGallery(),
                             const SizedBox(height: 16),
                             LiquidGlassCard(
                               child: Padding(
                                 padding: const EdgeInsets.all(16.0),
+                                child: Row(
+                                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                  children: [
+                                    const Text("공연 공개 설정", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                                    Row(
+                                      children: [
+                                        Text(isActive ? "공개 (Active)" : "비공개 (Hidden)", style: TextStyle(color: isActive ? Colors.greenAccent : Colors.white54, fontSize: 12)),
+                                        Switch(
+                                          value: isActive,
+                                          activeColor: Colors.greenAccent,
+                                          onChanged: (val) => setState(() => isActive = val),
+                                        ),
+                                      ],
+                                    )
+                                  ],
+                                ),
+                              ),
+                            ),
+                            const SizedBox(height: 16),
+                            // 카테고리
+                            LiquidGlassCard(
+                              child: Padding(
+                                padding: const EdgeInsets.all(16),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    const Text("카테고리 설정", style: TextStyle(color: Colors.cyanAccent, fontWeight: FontWeight.bold)),
+                                    const SizedBox(height: 10),
+                                    DropdownButtonFormField<String>(
+                                      value: selectedCategory,
+                                      dropdownColor: LiquidColors.darkCosmicMid,
+                                      style: const TextStyle(color: Colors.white),
+                                      decoration: _inputDeco("대분류"),
+                                      items: _categoryMap.keys.map((cat) {
+                                        return DropdownMenuItem(value: cat, child: Text(KLocalization.get('ko', 'cat_$cat')));
+                                      }).toList(),
+                                      onChanged: (val) {
+                                        setState(() {
+                                          selectedCategory = val!;
+                                          selectedSubCategory = _categoryMap[val]!.first;
+                                        });
+                                      },
+                                    ),
+                                    const SizedBox(height: 10),
+                                    DropdownButtonFormField<String>(
+                                      value: selectedSubCategory,
+                                      dropdownColor: LiquidColors.darkCosmicMid,
+                                      style: const TextStyle(color: Colors.white),
+                                      decoration: _inputDeco("소분류"),
+                                      items: _categoryMap[selectedCategory]!.map((sub) {
+                                        return DropdownMenuItem(value: sub, child: Text(KLocalization.get('ko', 'sub_$sub')));
+                                      }).toList(),
+                                      onChanged: (val) => setState(() => selectedSubCategory = val!),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                            const SizedBox(height: 16),
+                            
+                            // 외국인 관람 옵션
+                            LiquidGlassCard(
+                              child: Padding(
+                                padding: const EdgeInsets.all(16),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Row(
+                                      children: [
+                                        const Icon(Icons.language, color: Colors.orangeAccent, size: 20),
+                                        const SizedBox(width: 8),
+                                        const Text("외국인 관람 옵션 (다중 선택)", style: TextStyle(color: Colors.orangeAccent, fontWeight: FontWeight.bold)),
+                                      ],
+                                    ),
+                                    const SizedBox(height: 12),
+                                    Wrap(
+                                      spacing: 8.0,
+                                      runSpacing: 8.0,
+                                      children: _langOptions.entries.map((entry) {
+                                        final isSelected = selectedLanguages.contains(entry.key);
+                                        return FilterChip(
+                                          label: Text(entry.value),
+                                          selected: isSelected,
+                                          onSelected: (bool selected) {
+                                            setState(() {
+                                              if (selected) {
+                                                selectedLanguages.add(entry.key);
+                                              } else {
+                                                selectedLanguages.remove(entry.key);
+                                              }
+                                            });
+                                          },
+                                          selectedColor: Colors.orangeAccent.withOpacity(0.3),
+                                          checkmarkColor: Colors.orangeAccent,
+                                          labelStyle: TextStyle(
+                                            color: isSelected ? Colors.orangeAccent : Colors.white70,
+                                            fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                                          ),
+                                          backgroundColor: Colors.black26,
+                                          shape: RoundedRectangleBorder(
+                                            borderRadius: BorderRadius.circular(20),
+                                            side: BorderSide(color: isSelected ? Colors.orangeAccent : Colors.white24),
+                                          ),
+                                        );
+                                      }).toList(),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+
+                            const SizedBox(height: 16),
+                            
+                            LiquidGlassCard(
+                              child: Padding(
+                                padding: const EdgeInsets.all(16),
                                 child: Column(
                                   children: [
                                     _buildTextField(titleController, "공연 제목"),
@@ -283,11 +562,7 @@ class _HostHomePageState extends State<HostHomePage> {
                                       onTap: searchAddress,
                                       child: AbsorbPointer(
                                         absorbing: !kIsWeb, 
-                                        child: _buildTextField(
-                                          locationController, 
-                                          kIsWeb ? "장소 (직접 입력)" : "장소 (터치하여 검색)", 
-                                          icon: Icons.map
-                                        ),
+                                        child: _buildTextField(locationController, kIsWeb ? "장소 (직접 입력)" : "장소 (터치하여 검색)", icon: Icons.map),
                                       ),
                                     ),
                                     const SizedBox(height: 10),
@@ -313,58 +588,9 @@ class _HostHomePageState extends State<HostHomePage> {
                             LiquidGlassCard(
                               child: Padding(
                                 padding: const EdgeInsets.all(16),
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    const Text("카테고리 설정", style: TextStyle(color: Colors.cyanAccent, fontWeight: FontWeight.bold)),
-                                    const SizedBox(height: 10),
-                                    DropdownButtonFormField<String>(
-                                      value: selectedCategory,
-                                      dropdownColor: LiquidColors.darkCosmicMid,
-                                      style: const TextStyle(color: Colors.white),
-                                      decoration: _inputDeco("대분류"),
-                                      items: _categoryMap.keys.map((cat) {
-                                        // 🔥 [수정] 단어장에서 번역된 이름 가져오기 (KLocalization 사용)
-                                        // 여기서는 일단 키값(cat) 앞에 'cat_'을 붙여서 찾음 (예: cat_kpop)
-                                        return DropdownMenuItem(value: cat, child: Text(KLocalization.get('ko', 'cat_$cat')));
-                                      }).toList(),
-                                      onChanged: (val) {
-                                        setState(() {
-                                          selectedCategory = val!;
-                                          selectedSubCategory = _categoryMap[val]!.first;
-                                        });
-                                      },
-                                    ),
-                                    const SizedBox(height: 10),
-                                    DropdownButtonFormField<String>(
-                                      value: selectedSubCategory,
-                                      dropdownColor: LiquidColors.darkCosmicMid,
-                                      style: const TextStyle(color: Colors.white),
-                                      decoration: _inputDeco("소분류"),
-                                      items: _categoryMap[selectedCategory]!.map((sub) {
-                                        // 🔥 [수정] 소분류도 단어장에서 가져오기 (예: sub_idol)
-                                        return DropdownMenuItem(value: sub, child: Text(KLocalization.get('ko', 'sub_$sub')));
-                                      }).toList(),
-                                      onChanged: (val) => setState(() => selectedSubCategory = val!),
-                                    ),
-                                  ],
-                                ),
+                                child: _buildTextField(descriptionController, "공연 상세 소개 (500자 이내)", maxLines: 5, maxLength: 500),
                               ),
                             ),
-                            const SizedBox(height: 16),
-                            LiquidGlassCard(
-                              child: Padding(
-                                padding: const EdgeInsets.all(16),
-                                child: Column(
-                                  children: [
-                                    _buildTextField(descriptionController, "공연 상세 소개 (500자 이내)", maxLines: 5),
-                                    // 🔥 [삭제됨] 공연팀 모집하기 스위치 삭제됨
-                                  ],
-                                ),
-                              ),
-                            ),
-                            const SizedBox(height: 20),
-                            if (isProcessing) const CircularProgressIndicator(color: Colors.white),
                             const SizedBox(height: 40),
                           ],
                         ),
@@ -389,10 +615,11 @@ class _HostHomePageState extends State<HostHomePage> {
     );
   }
 
-  Widget _buildTextField(TextEditingController controller, String label, {int maxLines = 1, IconData? icon}) {
+  Widget _buildTextField(TextEditingController controller, String label, {int maxLines = 1, IconData? icon, int? maxLength}) {
     return TextField(
       controller: controller,
       maxLines: maxLines,
+      maxLength: maxLength,
       style: const TextStyle(color: Colors.white),
       decoration: InputDecoration(
         labelText: label,
@@ -400,12 +627,9 @@ class _HostHomePageState extends State<HostHomePage> {
         suffixIcon: icon != null ? Icon(icon, color: Colors.white70) : null,
         enabledBorder: const OutlineInputBorder(borderSide: BorderSide(color: Colors.white30)),
         focusedBorder: const OutlineInputBorder(borderSide: BorderSide(color: Colors.cyanAccent)),
+        counterStyle: const TextStyle(color: Colors.white70),
       ),
     );
-  }
-
-  Future<void> _deleteFestival(BuildContext context, String docId) async {
-    await FirebaseFirestore.instance.collection('festivals').doc(docId).delete();
   }
 
   @override
@@ -414,9 +638,7 @@ class _HostHomePageState extends State<HostHomePage> {
 
     if (user == null) {
       return const Scaffold(
-        body: LiquidBackground(
-          child: Center(child: CircularProgressIndicator(color: Colors.white)),
-        ),
+        body: LiquidBackground(child: Center(child: CircularProgressIndicator(color: Colors.white))),
       );
     }
 
@@ -457,7 +679,8 @@ class _HostHomePageState extends State<HostHomePage> {
             child: Column(
               children: [
                 LiquidGlassCard(
-                  onTap: () => _showEditor(context),
+                  // 🔥 [핵심] 기존: 바로 _showEditor 호출 / 변경: _handleWriteButton 호출 (권한 체크)
+                  onTap: _handleWriteButton, 
                   child: const Padding(
                     padding: EdgeInsets.all(20),
                     child: Row(
@@ -469,8 +692,14 @@ class _HostHomePageState extends State<HostHomePage> {
                 const SizedBox(height: 20),
                 Expanded(
                   child: StreamBuilder<QuerySnapshot>(
-                    stream: FirebaseFirestore.instance.collection('festivals').where('hostId', isEqualTo: user.uid).orderBy('createdAt', descending: true).snapshots(),
+                    stream: FirebaseFirestore.instance
+                        .collection('festivals')
+                        .where('hostId', isEqualTo: user.uid)
+                        .snapshots(),
                     builder: (context, snapshot) {
+                      if (snapshot.hasError) {
+                        return Center(child: Text("오류 발생: ${snapshot.error}", style: const TextStyle(color: Colors.red)));
+                      }
                       if (snapshot.connectionState == ConnectionState.waiting) return const Center(child: CircularProgressIndicator(color: Colors.white));
                       final docs = snapshot.data?.docs ?? [];
                       if (docs.isEmpty) return const Center(child: Text("등록된 공연이 없습니다.", style: TextStyle(color: Colors.white70)));
@@ -479,34 +708,69 @@ class _HostHomePageState extends State<HostHomePage> {
                         itemCount: docs.length,
                         itemBuilder: (context, index) {
                           final data = docs[index].data() as Map<String, dynamic>;
-                          
-                          // 🔥 [안전장치]
                           final String title = data['title']?.toString() ?? '제목 없음';
                           final String displayCategory = data['category']?.toString().toUpperCase() ?? 'KPOP';
                           final String subCategory = data['subCategory']?.toString() ?? 'IDOL';
                           final String imageUrl = data['image']?.toString() ?? '';
-
+                          final bool isActive = data['isActive'] ?? true;
                           final bool isValidImage = imageUrl.startsWith('http');
 
                           return Padding(
                             padding: const EdgeInsets.only(bottom: 12),
-                            child: LiquidGlassCard(
-                              onTap: () => _showEditor(context, doc: docs[index]),
-                              child: ListTile(
-                                leading: ClipRRect(
-                                  borderRadius: BorderRadius.circular(8), 
-                                  child: isValidImage
-                                    ? Image.network(
-                                        imageUrl, 
-                                        width: 50, height: 50, fit: BoxFit.cover, 
-                                        errorBuilder: (c,e,s) => const Icon(Icons.image, color: Colors.white)
-                                      )
-                                    : const SizedBox(width: 50, height: 50, child: Icon(Icons.image, color: Colors.white54)),
+                            child: Opacity(
+                              opacity: isActive ? 1.0 : 0.5,
+                              child: LiquidGlassCard(
+                                child: ListTile(
+                                  leading: ClipRRect(
+                                    borderRadius: BorderRadius.circular(8), 
+                                    child: isValidImage
+                                      ? Image.network(imageUrl, width: 50, height: 50, fit: BoxFit.cover, errorBuilder: (c,e,s) => const Icon(Icons.image, color: Colors.white))
+                                      : const SizedBox(width: 50, height: 50, child: Icon(Icons.image, color: Colors.white54)),
+                                  ),
+                                  title: Text(
+                                    title, 
+                                    style: TextStyle(
+                                      color: Colors.white, 
+                                      fontWeight: FontWeight.bold,
+                                      decoration: isActive ? null : TextDecoration.lineThrough, 
+                                    )
+                                  ),
+                                  subtitle: Text(
+                                    "$displayCategory / $subCategory \n${isActive ? '🟢 공개중' : '🔴 비공개'}", 
+                                    style: const TextStyle(color: Colors.white70, fontSize: 12)
+                                  ),
+                                  trailing: PopupMenuButton<String>(
+                                    icon: const Icon(Icons.more_vert, color: Colors.white),
+                                    color: LiquidColors.darkCosmicMid,
+                                    onSelected: (value) {
+                                      if (value == 'edit') {
+                                        _showEditor(context, doc: docs[index]);
+                                      } else if (value == 'toggle') {
+                                        _toggleActive(docs[index].id, isActive);
+                                      } else if (value == 'delete') {
+                                        _deleteFestival(docs[index].id);
+                                      }
+                                    },
+                                    itemBuilder: (context) => [
+                                      const PopupMenuItem(
+                                        value: 'edit',
+                                        child: Row(children: [Icon(Icons.edit, color: Colors.white, size: 20), SizedBox(width: 8), Text('수정', style: TextStyle(color: Colors.white))]),
+                                      ),
+                                      PopupMenuItem(
+                                        value: 'toggle',
+                                        child: Row(children: [
+                                          Icon(isActive ? Icons.visibility_off : Icons.visibility, color: Colors.white, size: 20), 
+                                          const SizedBox(width: 8), 
+                                          Text(isActive ? '비공개로 전환' : '공개로 전환', style: const TextStyle(color: Colors.white))
+                                        ]),
+                                      ),
+                                      const PopupMenuItem(
+                                        value: 'delete',
+                                        child: Row(children: [Icon(Icons.delete, color: Colors.redAccent, size: 20), SizedBox(width: 8), Text('삭제', style: TextStyle(color: Colors.redAccent))]),
+                                      ),
+                                    ],
+                                  ),
                                 ),
-                                title: Text(title, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-                                subtitle: Text("$displayCategory / $subCategory", style: const TextStyle(color: Colors.white70, fontSize: 12)),
-                                // 🔥 [수정] 지원자 보기 버튼 삭제됨 (대신 수정/삭제 팝업 메뉴 등 추가 가능)
-                                trailing: const Icon(Icons.edit, color: Colors.white54, size: 20),
                               ),
                             ),
                           );
